@@ -1,5 +1,10 @@
 /**
  * CanvasV3 - The Main V3 Canvas Component
+ * 
+ * V6 Features:
+ * - Organic wave preview on hover
+ * - Scroll wheel adjusts tolerance live
+ * - Zero-latency seed feedback
  */
 
 import React, { useRef, useLayoutEffect, useState, useCallback, useEffect } from 'react';
@@ -14,6 +19,7 @@ import {
   HOVER_PREVIEW_COLOR,
 } from './constants';
 import type { CanvasState, Layer, ToolType, SelectionMask, HoverPreview, WandOptions } from './types';
+import type { ExpansionMode } from './preview';
 
 // ============================================
 // HIGH-DPI INITIALIZATION
@@ -43,8 +49,10 @@ interface CanvasV3Props {
   layers: Layer[];
   activeTool: ToolType;
   wandOptions?: WandOptions;
+  expansionMode?: ExpansionMode;
   onSelectionChange?: (mask: SelectionMask | null) => void;
   onZoomChange?: (zoom: number) => void;
+  onToleranceChange?: (tolerance: number) => void;
   onError?: (message: string) => void;
 }
 
@@ -56,8 +64,10 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   layers,
   activeTool,
   wandOptions,
+  expansionMode = 'fast',
   onSelectionChange,
   onZoomChange,
+  onToleranceChange,
   onError,
 }) => {
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -84,6 +94,7 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   const [currentSelection, setCurrentSelection] = useState<SelectionMask | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cursorPosition, setCursorPosition] = useState<{ x: number; y: number } | null>(null);
+  const [currentTolerance, setCurrentTolerance] = useState(wandOptions?.tolerance ?? 32);
 
   // ============================================
   // LAYER LOADING
@@ -113,6 +124,7 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
         imageCache.current.set(layer.id, img);
         resolve(img);
         renderPipelineRef.current?.markLayersDirty();
+        magicWandHandlerRef.current?.markImageDataDirty();
       };
       
       img.onerror = () => {
@@ -166,17 +178,18 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     renderPipelineRef.current = new RenderPipeline(CANVAS_WIDTH, CANVAS_HEIGHT);
     renderPipelineRef.current.start(mainCanvas, coordSystemRef.current, stateRef);
     
-    // Interaction render loop
-    const interactionLoop = () => {
+    // Interaction render loop with marching ants
+    let lastTime = 0;
+    const interactionLoop = (time: number) => {
       const ctx = interactionCanvas.getContext('2d');
       if (ctx && coordSystemRef.current) {
         ctx.clearRect(0, 0, interactionCanvas.width, interactionCanvas.height);
         
-        // Draw selection overlay
+        // Draw selection overlay with marching ants
         if (currentSelection?.data) {
           ctx.save();
           coordSystemRef.current.applyTransform(ctx);
-          drawSelectionOverlay(ctx, currentSelection, SELECTION_COLOR);
+          drawSelectionOverlay(ctx, currentSelection, SELECTION_COLOR, time);
           ctx.restore();
         }
         
@@ -184,10 +197,16 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
         if (hoverPreview?.mask?.data && activeTool === 'magic-wand') {
           ctx.save();
           coordSystemRef.current.applyTransform(ctx);
-          drawSelectionOverlay(ctx, hoverPreview.mask, HOVER_PREVIEW_COLOR);
+          
+          // Draw zero-latency seed highlight
+          magicWandHandlerRef.current?.drawInstantSeed(ctx);
+          
+          // Draw wave preview
+          drawSelectionOverlay(ctx, hoverPreview.mask, HOVER_PREVIEW_COLOR, time);
           ctx.restore();
         }
       }
+      lastTime = time;
       interactionRafIdRef.current = requestAnimationFrame(interactionLoop);
     };
     interactionRafIdRef.current = requestAnimationFrame(interactionLoop);
@@ -210,6 +229,12 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     });
     
     magicWandHandlerRef.current.setOnHoverPreviewChange(setHoverPreview);
+    
+    magicWandHandlerRef.current.setOnToleranceChange((tol) => {
+      setCurrentTolerance(tol);
+      onToleranceChange?.(tol);
+    });
+    
     magicWandHandlerRef.current.setOnError((msg) => {
       setError(msg);
       onError?.(msg);
@@ -243,8 +268,16 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     if (magicWandHandlerRef.current && wandOptions) {
       magicWandHandlerRef.current.tolerance = wandOptions.tolerance;
       magicWandHandlerRef.current.contiguous = wandOptions.contiguous;
+      setCurrentTolerance(wandOptions.tolerance);
     }
   }, [wandOptions]);
+
+  // Update expansion mode
+  useEffect(() => {
+    if (magicWandHandlerRef.current) {
+      magicWandHandlerRef.current.setExpansionMode(expansionMode);
+    }
+  }, [expansionMode]);
 
   // Update pan mode based on tool
   useEffect(() => {
@@ -282,11 +315,11 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     }
   }, [activeTool]);
 
-  const handleClick = useCallback(async (e: React.MouseEvent) => {
+  const handleClick = useCallback((e: React.MouseEvent) => {
     if (!coordSystemRef.current) return;
     
     if (activeTool === 'magic-wand' && magicWandHandlerRef.current) {
-      await magicWandHandlerRef.current.handleClick(e.clientX, e.clientY);
+      magicWandHandlerRef.current.handleClick(e.clientX, e.clientY);
     }
   }, [activeTool]);
 
@@ -297,6 +330,22 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     }
     setHoverPreview(null);
   }, []);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    // If magic wand is active and hovering, use wheel for tolerance
+    if (activeTool === 'magic-wand' && magicWandHandlerRef.current) {
+      const isHovering = hoverPreview !== null || cursorPosition !== null;
+      
+      if (isHovering && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        magicWandHandlerRef.current.handleWheel(e.deltaY);
+        return;
+      }
+    }
+    
+    // Otherwise let PanZoomHandler handle it
+  }, [activeTool, hoverPreview, cursorPosition]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -327,16 +376,30 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
         onClick={handleClick}
+        onWheelCapture={handleWheel}
       />
       
       {/* Status bar */}
       <div className="absolute bottom-3 right-3 flex items-center gap-3 px-3 py-1.5 bg-card/90 backdrop-blur-sm border border-border rounded-md text-xs font-mono">
         <span className="text-muted-foreground">
-          {cursorPosition ? `${cursorPosition.x}, ${cursorPosition.y}` : '—'}
+          {cursorPosition ? `${Math.floor(cursorPosition.x)}, ${Math.floor(cursorPosition.y)}` : '—'}
         </span>
         <span className="text-border">|</span>
         <span className="text-foreground">{zoomPercent}%</span>
+        {activeTool === 'magic-wand' && (
+          <>
+            <span className="text-border">|</span>
+            <span className="text-primary">Tol: {currentTolerance}</span>
+          </>
+        )}
       </div>
+      
+      {/* Scroll hint for magic wand */}
+      {activeTool === 'magic-wand' && hoverPreview && (
+        <div className="absolute bottom-12 right-3 px-2 py-1 bg-card/80 backdrop-blur-sm border border-border rounded text-xs text-muted-foreground animate-fade-in">
+          Scroll to adjust tolerance
+        </div>
+      )}
       
       {/* Error toast */}
       {error && (
@@ -354,30 +417,61 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   );
 };
 
-// Helper to draw selection overlay
+// Helper to draw selection overlay with marching ants
 function drawSelectionOverlay(
   ctx: CanvasRenderingContext2D,
   mask: SelectionMask,
-  color: string
+  color: string,
+  timestamp: number = 0
 ): void {
   const { data, width, height } = mask;
   
   const imageData = ctx.createImageData(width, height);
   const pixels = imageData.data;
   
-  // Parse color (expects rgba format)
-  const r = parseInt(color.slice(5, 8)) || 100;
-  const g = parseInt(color.slice(10, 13)) || 200;
-  const b = parseInt(color.slice(15, 18)) || 100;
-  const a = parseFloat(color.slice(20, 24)) || 0.3;
+  // Fill colors
+  const fillR = 100, fillG = 200, fillB = 100, fillA = 80;
+  const borderR = 255, borderG = 255, borderB = 255;
   
-  for (let i = 0; i < data.length; i++) {
-    if (data[i] > 0) {
-      const idx = i * 4;
-      pixels[idx] = r;
-      pixels[idx + 1] = g;
-      pixels[idx + 2] = b;
-      pixels[idx + 3] = Math.round(a * 255);
+  // Marching ants offset (animates the border)
+  const antOffset = Math.floor(timestamp / 100) % 8;
+  
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      
+      if (data[i] > 0) {
+        const idx = i * 4;
+        
+        // Check if this is a border pixel
+        const isLeft = x > 0 && data[i - 1] === 0;
+        const isRight = x < width - 1 && data[i + 1] === 0;
+        const isTop = y > 0 && data[i - width] === 0;
+        const isBottom = y < height - 1 && data[i + width] === 0;
+        const isBorder = isLeft || isRight || isTop || isBottom;
+        
+        if (isBorder) {
+          // Marching ants pattern
+          const antPhase = ((x + y + antOffset) % 8) < 4;
+          if (antPhase) {
+            pixels[idx] = borderR;
+            pixels[idx + 1] = borderG;
+            pixels[idx + 2] = borderB;
+            pixels[idx + 3] = 220;
+          } else {
+            pixels[idx] = 0;
+            pixels[idx + 1] = 0;
+            pixels[idx + 2] = 0;
+            pixels[idx + 3] = 220;
+          }
+        } else {
+          // Interior fill
+          pixels[idx] = fillR;
+          pixels[idx + 1] = fillG;
+          pixels[idx + 2] = fillB;
+          pixels[idx + 3] = fillA;
+        }
+      }
     }
   }
   

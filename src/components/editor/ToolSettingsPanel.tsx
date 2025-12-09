@@ -2,16 +2,22 @@ import React from 'react';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { WandOptions } from '../CanvasV3/types';
+import type { ExpansionMode } from '../CanvasV3/preview';
 
 interface ToolSettingsPanelProps {
   wandOptions: WandOptions;
+  expansionMode: ExpansionMode;
   onWandOptionsChange: (options: Partial<WandOptions>) => void;
+  onExpansionModeChange: (mode: ExpansionMode) => void;
 }
 
 export const ToolSettingsPanel: React.FC<ToolSettingsPanelProps> = ({
   wandOptions,
+  expansionMode,
   onWandOptionsChange,
+  onExpansionModeChange,
 }) => {
   return (
     <div className="p-3 space-y-4 bg-card border-r border-border w-56">
@@ -34,6 +40,23 @@ export const ToolSettingsPanel: React.FC<ToolSettingsPanelProps> = ({
           step={1}
           onValueChange={([value]) => onWandOptionsChange({ tolerance: value })}
         />
+        <p className="text-[10px] text-muted-foreground">Scroll on canvas to adjust live</p>
+      </div>
+      
+      {/* Expansion Speed */}
+      <div className="space-y-2">
+        <Label className="text-xs">Preview Speed</Label>
+        <Select value={expansionMode} onValueChange={(v) => onExpansionModeChange(v as ExpansionMode)}>
+          <SelectTrigger className="h-8 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="instant">Instant</SelectItem>
+            <SelectItem value="fast">Fast</SelectItem>
+            <SelectItem value="normal">Normal (Wave)</SelectItem>
+            <SelectItem value="slow">Slow (Dramatic)</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
       
       {/* Contiguous */}

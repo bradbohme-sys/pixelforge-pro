@@ -1,31 +1,50 @@
 /**
- * V3MagicWandHandler - Magic Wand Tool with Worker Offloading
+ * V3MagicWandHandler - Magic Wand Tool with V6 Organic Preview
+ * 
+ * Features:
+ * - Ring BFS expansion with adjustable speed
+ * - Scroll wheel adjusts tolerance live (breathing tolerance)
+ * - Zero-latency seed preview
+ * - Cursor hover shows segment preview
  */
 
 import { CoordinateSystem } from './CoordinateSystem';
-import { HOVER_THROTTLE_MS, CANVAS_WIDTH, CANVAS_HEIGHT } from './constants';
-import type { SelectionMask, HoverPreview, MagicWandRequest, MagicWandResponse, Layer, Point } from './types';
+import { CANVAS_WIDTH, CANVAS_HEIGHT } from './constants';
+import type { SelectionMask, HoverPreview, Layer, Point } from './types';
+import {
+  PreviewWaveEngine,
+  ZeroLatencyPreview,
+  ExpansionMode,
+  PreviewResult,
+} from './preview';
 
 export class V3MagicWandHandler {
   private coordSystem: CoordinateSystem;
-  private worker: Worker;
   private isTerminated: boolean = false;
   
   private layers: Layer[] = [];
   private imageCache: Map<string, HTMLImageElement> = new Map();
+  private cachedImageData: ImageData | null = null;
+  private imageDataDirty: boolean = true;
   
-  private isWorkerBusy: boolean = false;
-  private currentRequestId: number = 0;
-  private lastRequestTime: number = 0;
+  // V6 Preview System
+  private waveEngine: PreviewWaveEngine;
+  private zeroLatency: ZeroLatencyPreview;
   
+  // State
   private currentMask: SelectionMask | null = null;
-  private hoverPreview: HoverPreview | null = null;
+  private currentSeedPoint: Point | null = null;
+  private isHovering: boolean = false;
   
+  // Options
   tolerance: number = 32;
   contiguous: boolean = true;
+  expansionMode: ExpansionMode = 'fast';
   
+  // Callbacks
   private onSelectionChange: ((mask: SelectionMask | null) => void) | null = null;
   private onHoverPreviewChange: ((preview: HoverPreview | null) => void) | null = null;
+  private onToleranceChange: ((tolerance: number) => void) | null = null;
   private onError: ((message: string) => void) | null = null;
 
   constructor(
@@ -37,21 +56,25 @@ export class V3MagicWandHandler {
     this.layers = layers;
     this.imageCache = imageCache;
     
-    this.worker = new Worker(
-      new URL('./workers/magicWand.worker.ts', import.meta.url),
-      { type: 'module' }
-    );
+    // Initialize V6 preview system
+    this.waveEngine = new PreviewWaveEngine();
+    this.zeroLatency = new ZeroLatencyPreview();
     
-    this.worker.onmessage = this.handleWorkerMessage;
-    this.worker.onerror = this.handleWorkerError;
+    // Set up wave engine callbacks
+    this.waveEngine.setOnProgress(this.handleWaveProgress);
+    this.waveEngine.setOnComplete(this.handleWaveComplete);
   }
 
   terminate(): void {
     if (!this.isTerminated) {
-      this.worker.terminate();
+      this.waveEngine.cancelAll();
       this.isTerminated = true;
     }
   }
+
+  // ============================================
+  // CALLBACK SETTERS
+  // ============================================
 
   setOnSelectionChange(callback: (mask: SelectionMask | null) => void): void {
     this.onSelectionChange = callback;
@@ -61,16 +84,47 @@ export class V3MagicWandHandler {
     this.onHoverPreviewChange = callback;
   }
 
+  setOnToleranceChange(callback: (tolerance: number) => void): void {
+    this.onToleranceChange = callback;
+  }
+
   setOnError(callback: (message: string) => void): void {
     this.onError = callback;
   }
 
+  // ============================================
+  // LAYER MANAGEMENT
+  // ============================================
+
   updateLayers(layers: Layer[], imageCache: Map<string, HTMLImageElement>): void {
     this.layers = layers;
     this.imageCache = imageCache;
+    this.markImageDataDirty();
   }
 
-  getCompositeImageData(): ImageData | null {
+  markImageDataDirty(): void {
+    this.imageDataDirty = true;
+    this.cachedImageData = null;
+  }
+
+  // ============================================
+  // EXPANSION MODE
+  // ============================================
+
+  setExpansionMode(mode: ExpansionMode): void {
+    this.expansionMode = mode;
+    this.waveEngine.setExpansionMode(mode);
+  }
+
+  // ============================================
+  // IMAGE DATA
+  // ============================================
+
+  private getCompositeImageData(): ImageData | null {
+    if (!this.imageDataDirty && this.cachedImageData) {
+      return this.cachedImageData;
+    }
+    
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = CANVAS_WIDTH;
     tempCanvas.height = CANVAS_HEIGHT;
@@ -106,13 +160,81 @@ export class V3MagicWandHandler {
     }
     
     try {
-      return ctx.getImageData(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      this.cachedImageData = ctx.getImageData(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      this.imageDataDirty = false;
+      return this.cachedImageData;
     } catch {
       return null;
     }
   }
 
-  async handleClick(screenX: number, screenY: number): Promise<void> {
+  // ============================================
+  // HOVER HANDLING (V6 Preview)
+  // ============================================
+
+  handleHover(screenX: number, screenY: number): void {
+    if (this.isTerminated) return;
+    
+    const worldPoint = this.coordSystem.screenToWorld(screenX, screenY);
+    
+    if (!this.coordSystem.isInBounds(worldPoint.x, worldPoint.y)) {
+      this.clearHoverPreview();
+      return;
+    }
+    
+    this.isHovering = true;
+    this.currentSeedPoint = { x: Math.floor(worldPoint.x), y: Math.floor(worldPoint.y) };
+    
+    const imageData = this.getCompositeImageData();
+    if (!imageData) return;
+    
+    // Start wave preview
+    this.waveEngine.startWave(imageData, this.currentSeedPoint, this.tolerance);
+  }
+
+  clearHoverPreview(): void {
+    this.isHovering = false;
+    this.currentSeedPoint = null;
+    this.waveEngine.cancelAll();
+    this.onHoverPreviewChange?.(null);
+  }
+
+  // ============================================
+  // SCROLL HANDLING (Breathing Tolerance)
+  // ============================================
+
+  handleWheel(deltaY: number): void {
+    if (!this.isHovering || !this.currentSeedPoint) return;
+    
+    // Adjust tolerance based on scroll direction
+    const toleranceStep = 2;
+    const newTolerance = Math.max(0, Math.min(255, 
+      this.tolerance + (deltaY > 0 ? toleranceStep : -toleranceStep)
+    ));
+    
+    if (newTolerance !== this.tolerance) {
+      this.tolerance = newTolerance;
+      this.onToleranceChange?.(newTolerance);
+      
+      // Use breathing tolerance to expand/contract
+      if (deltaY > 0) {
+        // Increasing tolerance - re-test rejected frontier
+        this.waveEngine.updateTolerance(newTolerance);
+      } else {
+        // Decreasing tolerance - restart preview (simpler than contraction)
+        const imageData = this.getCompositeImageData();
+        if (imageData && this.currentSeedPoint) {
+          this.waveEngine.startWave(imageData, this.currentSeedPoint, newTolerance);
+        }
+      }
+    }
+  }
+
+  // ============================================
+  // CLICK HANDLING (Finalize Selection)
+  // ============================================
+
+  handleClick(screenX: number, screenY: number): void {
     if (this.isTerminated) return;
     
     const worldPoint = this.coordSystem.screenToWorld(screenX, screenY);
@@ -127,102 +249,86 @@ export class V3MagicWandHandler {
       return;
     }
     
-    this.sendToWorker(imageData, worldPoint.x, worldPoint.y);
+    const seedPoint = { x: Math.floor(worldPoint.x), y: Math.floor(worldPoint.y) };
+    
+    // Use instant mode for click (immediate result)
+    const previousMode = this.expansionMode;
+    this.waveEngine.setExpansionMode('instant');
+    
+    // Set completion callback to finalize selection
+    this.waveEngine.setOnComplete((result) => {
+      this.finalizeSelection(result);
+      // Restore expansion mode
+      this.waveEngine.setExpansionMode(previousMode);
+    });
+    
+    this.waveEngine.startWave(imageData, seedPoint, this.tolerance);
   }
 
-  handleHover(screenX: number, screenY: number): void {
-    if (this.isTerminated) return;
-    
-    const now = Date.now();
-    if (now - this.lastRequestTime < HOVER_THROTTLE_MS) {
-      return;
-    }
-    this.lastRequestTime = now;
-    
-    const worldPoint = this.coordSystem.screenToWorld(screenX, screenY);
-    
-    if (!this.coordSystem.isInBounds(worldPoint.x, worldPoint.y)) {
-      this.hoverPreview = null;
-      this.onHoverPreviewChange?.(null);
-      return;
-    }
-    
-    if (this.isWorkerBusy) {
-      return;
-    }
-    
-    const imageData = this.getCompositeImageData();
-    if (!imageData) {
-      return;
-    }
-    
-    this.sendToWorker(imageData, worldPoint.x, worldPoint.y);
-  }
+  // ============================================
+  // WAVE CALLBACKS
+  // ============================================
 
-  clearHoverPreview(): void {
-    this.hoverPreview = null;
-    this.onHoverPreviewChange?.(null);
-  }
-
-  private sendToWorker(imageData: ImageData, seedX: number, seedY: number): void {
-    this.currentRequestId++;
-    
-    const request: MagicWandRequest = {
-      type: 'segment',
-      requestId: this.currentRequestId,
-      imageData,
-      seedX,
-      seedY,
-      tolerance: this.tolerance,
-      contiguous: this.contiguous,
-    };
-    
-    this.isWorkerBusy = true;
-    this.worker.postMessage(request, { transfer: [imageData.data.buffer] });
-  }
-
-  private handleWorkerMessage = (e: MessageEvent<MagicWandResponse>): void => {
-    this.isWorkerBusy = false;
-    
-    const response = e.data;
-    
-    if (response.requestId !== this.currentRequestId) {
-      return;
-    }
-    
-    if (response.type === 'error') {
-      this.onError?.(response.error || 'Unknown error');
-      return;
-    }
-    
-    if (!response.mask || !response.bounds) return;
+  private handleWaveProgress = (result: PreviewResult): void => {
+    if (!this.isHovering) return;
     
     const mask: SelectionMask = {
-      data: response.mask,
+      data: new Uint8Array(result.mask),
       width: CANVAS_WIDTH,
       height: CANVAS_HEIGHT,
-      bounds: response.bounds,
+      bounds: result.bounds,
     };
     
-    this.currentMask = mask;
-    this.hoverPreview = {
+    this.onHoverPreviewChange?.({
       mask,
       worldPoint: { x: 0, y: 0, __space: 'world' },
       timestamp: Date.now(),
-    };
-    
-    this.onSelectionChange?.(mask);
-    this.onHoverPreviewChange?.(this.hoverPreview);
+    });
   };
 
-  private handleWorkerError = (error: ErrorEvent): void => {
-    this.isWorkerBusy = false;
-    console.error('[V3MagicWand] Worker error:', error.message);
-    this.onError?.(`Segmentation failed: ${error.message}`);
+  private handleWaveComplete = (result: PreviewResult): void => {
+    // If hovering, update preview
+    if (this.isHovering) {
+      this.handleWaveProgress(result);
+    }
   };
+
+  private finalizeSelection(result: PreviewResult): void {
+    const mask: SelectionMask = {
+      data: new Uint8Array(result.mask),
+      width: CANVAS_WIDTH,
+      height: CANVAS_HEIGHT,
+      bounds: result.bounds,
+    };
+    
+    this.currentMask = mask;
+    this.onSelectionChange?.(mask);
+  }
+
+  // ============================================
+  // ZERO LATENCY PREVIEW
+  // ============================================
+
+  drawInstantSeed(ctx: CanvasRenderingContext2D): void {
+    if (this.currentSeedPoint && this.isHovering) {
+      this.zeroLatency.drawInstantSeed(ctx, this.currentSeedPoint, this.coordSystem.zoom);
+    }
+  }
+
+  // ============================================
+  // GETTERS
+  // ============================================
 
   getCurrentMask(): SelectionMask | null {
     return this.currentMask;
+  }
+
+  getCurrentSeedPoint(): Point | null {
+    return this.currentSeedPoint;
+  }
+
+  isPreviewActive(): boolean {
+    return this.waveEngine.isActive();
   }
 
   clearSelection(): void {

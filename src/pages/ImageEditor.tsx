@@ -6,6 +6,7 @@ import { ToolSettingsPanel } from '@/components/editor/ToolSettingsPanel';
 import { TopBar } from '@/components/editor/TopBar';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from '@/components/CanvasV3/constants';
 import type { ToolType, Layer, WandOptions, SelectionMask } from '@/components/CanvasV3/types';
+import type { ExpansionMode } from '@/components/CanvasV3/preview';
 import { toast } from 'sonner';
 
 const ImageEditor: React.FC = () => {
@@ -17,6 +18,7 @@ const ImageEditor: React.FC = () => {
     antiAlias: true,
     feather: 0,
   });
+  const [expansionMode, setExpansionMode] = useState<ExpansionMode>('fast');
   
   // Layer state
   const [layers, setLayers] = useState<Layer[]>([]);
@@ -246,7 +248,9 @@ const ImageEditor: React.FC = () => {
         {activeTool === 'magic-wand' && (
           <ToolSettingsPanel
             wandOptions={wandOptions}
+            expansionMode={expansionMode}
             onWandOptionsChange={handleWandOptionsChange}
+            onExpansionModeChange={setExpansionMode}
           />
         )}
         
@@ -256,8 +260,10 @@ const ImageEditor: React.FC = () => {
             layers={layers}
             activeTool={activeTool}
             wandOptions={wandOptions}
+            expansionMode={expansionMode}
             onZoomChange={handleZoomChange}
             onSelectionChange={handleSelectionChange}
+            onToleranceChange={(tol) => setWandOptions(prev => ({ ...prev, tolerance: tol }))}
             onError={handleError}
           />
         </div>

@@ -65,9 +65,9 @@ export class V3MagicWandHandler {
     this.waveEngine = new PreviewWaveEngine();
     this.zeroLatency = new ZeroLatencyPreview();
     
-    // Set up wave engine callbacks
-    this.waveEngine.setOnProgress(this.handleWaveProgress);
-    this.waveEngine.setOnComplete(this.handleWaveComplete);
+    // Set up wave engine callbacks (bound to instance)
+    this.waveEngine.setOnProgress((result) => this.handleWaveProgress(result));
+    this.waveEngine.setOnComplete((result) => this.handleWaveComplete(result));
   }
 
   terminate(): void {
@@ -287,7 +287,7 @@ export class V3MagicWandHandler {
   // WAVE CALLBACKS
   // ============================================
 
-  private handleWaveProgress = (result: PreviewResult): void => {
+  private handleWaveProgress(result: PreviewResult): void {
     if (!this.isHovering) return;
     
     const mask: SelectionMask = {
@@ -302,14 +302,14 @@ export class V3MagicWandHandler {
       worldPoint: { x: 0, y: 0, __space: 'world' },
       timestamp: Date.now(),
     });
-  };
+  }
 
-  private handleWaveComplete = (result: PreviewResult): void => {
+  private handleWaveComplete(result: PreviewResult): void {
     // If hovering, update preview
     if (this.isHovering) {
       this.handleWaveProgress(result);
     }
-  };
+  }
 
   private finalizeSelection(result: PreviewResult, selectionMode: SelectionMode): void {
     let finalMask: Uint8Array;

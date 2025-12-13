@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Sparkles, Loader2 } from 'lucide-react';
 import type { WandOptions } from '../CanvasV3/types';
 import type { ExpansionMode } from '../CanvasV3/preview';
 
@@ -11,6 +13,8 @@ interface ToolSettingsPanelProps {
   expansionMode: ExpansionMode;
   onWandOptionsChange: (options: Partial<WandOptions>) => void;
   onExpansionModeChange: (mode: ExpansionMode) => void;
+  onAIDiscover?: () => Promise<void>;
+  isAIProcessing?: boolean;
 }
 
 export const ToolSettingsPanel: React.FC<ToolSettingsPanelProps> = ({
@@ -18,12 +22,46 @@ export const ToolSettingsPanel: React.FC<ToolSettingsPanelProps> = ({
   expansionMode,
   onWandOptionsChange,
   onExpansionModeChange,
+  onAIDiscover,
+  isAIProcessing = false,
 }) => {
   return (
     <div className="p-3 space-y-4 bg-card border-r border-border w-56">
       <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
         Magic Wand Settings
       </h3>
+      
+      {/* AI Segmentation */}
+      {onAIDiscover && (
+        <div className="space-y-2 pb-3 border-b border-border">
+          <Label className="text-xs flex items-center gap-1.5">
+            <Sparkles className="w-3 h-3 text-primary" />
+            AI Auto-Segment
+          </Label>
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-full h-8 text-xs"
+            onClick={onAIDiscover}
+            disabled={isAIProcessing}
+          >
+            {isAIProcessing ? (
+              <>
+                <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                Analyzing...
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-3 h-3 mr-1.5" />
+                Discover Objects
+              </>
+            )}
+          </Button>
+          <p className="text-[10px] text-muted-foreground">
+            AI finds all selectable objects using Nano Banana Pro
+          </p>
+        </div>
+      )}
       
       {/* Tolerance */}
       <div className="space-y-2">

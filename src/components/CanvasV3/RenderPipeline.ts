@@ -112,6 +112,8 @@ export class RenderPipeline {
     const ctx = this.mainCanvas.getContext('2d');
     if (!ctx) return;
     
+    // Reset transform and clear entire buffer
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.mainCanvas.width, this.mainCanvas.height);
     
     if (this.layerCacheDirty) {

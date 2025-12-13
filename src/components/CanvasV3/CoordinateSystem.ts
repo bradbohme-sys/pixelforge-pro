@@ -172,10 +172,21 @@ export class CoordinateSystem {
   /**
    * Apply the transform to a canvas context for rendering
    * This positions content so the image is centered in the viewport
+   * 
+   * IMPORTANT: We apply DPR scale here, not in initializeHighDPICanvas,
+   * so all our coordinate math stays in CSS space.
    */
   applyTransform(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D): void {
+    const dpr = this.dpr;
     const offset = this.getImageOffset();
+    
+    // First scale by DPR to convert CSS coords to buffer coords
+    ctx.scale(dpr, dpr);
+    
+    // Then apply pan and centering offset (all in CSS space)
     ctx.translate(offset.x + this._panX, offset.y + this._panY);
+    
+    // Finally apply zoom
     ctx.scale(this._zoom, this._zoom);
   }
 

@@ -25,20 +25,28 @@ import type { ExpansionMode } from './preview';
 // HIGH-DPI INITIALIZATION
 // ============================================
 
-function initializeHighDPICanvas(canvas: HTMLCanvasElement): void {
+/**
+ * Initialize canvas for high-DPI displays.
+ * 
+ * IMPORTANT: We set the canvas buffer size to CSS size × DPR, but we do NOT
+ * apply a global ctx.scale(dpr, dpr). Instead, we handle DPR in the coordinate
+ * system's applyTransform method. This keeps all our coordinate math in CSS space.
+ */
+function initializeHighDPICanvas(canvas: HTMLCanvasElement): number {
   const rect = canvas.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
   
+  // Set buffer size (physical pixels)
   canvas.width = rect.width * dpr;
   canvas.height = rect.height * dpr;
   
+  // Set CSS size
   canvas.style.width = `${rect.width}px`;
   canvas.style.height = `${rect.height}px`;
   
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    ctx.scale(dpr, dpr);
-  }
+  // Return DPR so caller can use it - but do NOT apply global scale here
+  // The CoordinateSystem.applyTransform will handle all scaling
+  return dpr;
 }
 
 // ============================================
@@ -200,6 +208,8 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     const interactionLoop = (time: number) => {
       const ctx = interactionCanvas.getContext('2d');
       if (ctx && coordSystemRef.current) {
+        // Clear entire buffer (use buffer dimensions)
+        ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform first
         ctx.clearRect(0, 0, interactionCanvas.width, interactionCanvas.height);
         
         // Draw selection overlay with marching ants (use ref to avoid stale closure)

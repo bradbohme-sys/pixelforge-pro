@@ -27,6 +27,7 @@ export class PreviewWaveEngine {
   private rafId: number | null = null;
   private isRunning: boolean = false;
   private expansionMode: ExpansionMode = 'normal';
+  private connectivity: 4 | 8 = 4;
   
   private cancellation: RequestCancellation;
   private onProgress: ((result: PreviewResult) => void) | null = null;
@@ -34,6 +35,13 @@ export class PreviewWaveEngine {
 
   constructor() {
     this.cancellation = new RequestCancellation();
+  }
+
+  /**
+   * Set connectivity mode (4 or 8)
+   */
+  setConnectivity(connectivity: 4 | 8): void {
+    this.connectivity = connectivity;
   }
 
   /**
@@ -103,6 +111,7 @@ export class PreviewWaveEngine {
       seedR: data[pixelIdx],
       seedG: data[pixelIdx + 1],
       seedB: data[pixelIdx + 2],
+      connectivity: this.connectivity,
     };
     
     // Mark seed as visited
@@ -302,13 +311,23 @@ export class PreviewWaveEngine {
       const x = currentIdx % width;
       const y = Math.floor(currentIdx / width);
       
-      // Check 4-connectivity neighbors
-      const neighbors = [
+      // Build neighbor list based on connectivity
+      const neighbors: number[] = [
         x > 0 ? currentIdx - 1 : -1,           // left
         x < width - 1 ? currentIdx + 1 : -1,   // right
         y > 0 ? currentIdx - width : -1,        // up
         y < height - 1 ? currentIdx + width : -1, // down
       ];
+      
+      // Add diagonal neighbors for 8-connectivity
+      if (this.state?.connectivity === 8) {
+        neighbors.push(
+          (x > 0 && y > 0) ? currentIdx - width - 1 : -1,           // top-left
+          (x < width - 1 && y > 0) ? currentIdx - width + 1 : -1,   // top-right
+          (x > 0 && y < height - 1) ? currentIdx + width - 1 : -1,  // bottom-left
+          (x < width - 1 && y < height - 1) ? currentIdx + width + 1 : -1, // bottom-right
+        );
+      }
       
       for (const neighborIdx of neighbors) {
         if (neighborIdx < 0) continue;

@@ -59,6 +59,24 @@ export const ToolSettingsPanel: React.FC<ToolSettingsPanelProps> = ({
         </Select>
       </div>
       
+      {/* Connectivity */}
+      <div className="space-y-2">
+        <Label className="text-xs">Connectivity</Label>
+        <Select 
+          value={String(wandOptions.connectivity)} 
+          onValueChange={(v) => onWandOptionsChange({ connectivity: Number(v) as 4 | 8 })}
+        >
+          <SelectTrigger className="h-8 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="4">4-way (Cardinal)</SelectItem>
+            <SelectItem value="8">8-way (Diagonal)</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-[10px] text-muted-foreground">8-way includes diagonals</p>
+      </div>
+      
       {/* Contiguous */}
       <div className="flex items-center justify-between">
         <Label className="text-xs">Contiguous</Label>
@@ -92,6 +110,17 @@ export const ToolSettingsPanel: React.FC<ToolSettingsPanelProps> = ({
           step={1}
           onValueChange={([value]) => onWandOptionsChange({ feather: value })}
         />
+        <p className="text-[10px] text-muted-foreground">Softens selection edges</p>
+      </div>
+      
+      {/* Modifier hints */}
+      <div className="pt-2 border-t border-border space-y-1">
+        <p className="text-[10px] text-muted-foreground">
+          <span className="font-medium text-foreground">Shift+Click</span> to add to selection
+        </p>
+        <p className="text-[10px] text-muted-foreground">
+          <span className="font-medium text-foreground">Alt+Click</span> to subtract from selection
+        </p>
       </div>
     </div>
   );

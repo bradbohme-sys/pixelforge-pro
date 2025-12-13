@@ -6,11 +6,14 @@
  * - Scroll wheel adjusts tolerance live (breathing tolerance)
  * - Zero-latency seed preview
  * - Cursor hover shows segment preview
+ * - 4 or 8 connectivity
+ * - Shift+click to add, Alt+click to subtract
+ * - Feathering support
  */
 
 import { CoordinateSystem } from './CoordinateSystem';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from './constants';
-import type { SelectionMask, HoverPreview, Layer, Point } from './types';
+import type { SelectionMask, HoverPreview, Layer, Point, SelectionMode } from './types';
 import {
   PreviewWaveEngine,
   ZeroLatencyPreview,
@@ -40,6 +43,8 @@ export class V3MagicWandHandler {
   tolerance: number = 32;
   contiguous: boolean = true;
   expansionMode: ExpansionMode = 'fast';
+  connectivity: 4 | 8 = 4;
+  feather: number = 0;
   
   // Callbacks
   private onSelectionChange: ((mask: SelectionMask | null) => void) | null = null;
@@ -108,12 +113,21 @@ export class V3MagicWandHandler {
   }
 
   // ============================================
-  // EXPANSION MODE
+  // OPTIONS
   // ============================================
 
   setExpansionMode(mode: ExpansionMode): void {
     this.expansionMode = mode;
     this.waveEngine.setExpansionMode(mode);
+  }
+
+  setConnectivity(connectivity: 4 | 8): void {
+    this.connectivity = connectivity;
+    this.waveEngine.setConnectivity(connectivity);
+  }
+
+  setFeather(feather: number): void {
+    this.feather = feather;
   }
 
   // ============================================
@@ -188,6 +202,9 @@ export class V3MagicWandHandler {
     const imageData = this.getCompositeImageData();
     if (!imageData) return;
     
+    // Apply current connectivity setting
+    this.waveEngine.setConnectivity(this.connectivity);
+    
     // Start wave preview
     this.waveEngine.startWave(imageData, this.currentSeedPoint, this.tolerance);
   }
@@ -234,7 +251,7 @@ export class V3MagicWandHandler {
   // CLICK HANDLING (Finalize Selection)
   // ============================================
 
-  handleClick(screenX: number, screenY: number): void {
+  handleClick(screenX: number, screenY: number, selectionMode: SelectionMode = 'replace'): void {
     if (this.isTerminated) return;
     
     const worldPoint = this.coordSystem.screenToWorld(screenX, screenY);
@@ -254,10 +271,11 @@ export class V3MagicWandHandler {
     // Use instant mode for click (immediate result)
     const previousMode = this.expansionMode;
     this.waveEngine.setExpansionMode('instant');
+    this.waveEngine.setConnectivity(this.connectivity);
     
     // Set completion callback to finalize selection
     this.waveEngine.setOnComplete((result) => {
-      this.finalizeSelection(result);
+      this.finalizeSelection(result, selectionMode);
       // Restore expansion mode
       this.waveEngine.setExpansionMode(previousMode);
     });
@@ -293,16 +311,125 @@ export class V3MagicWandHandler {
     }
   };
 
-  private finalizeSelection(result: PreviewResult): void {
+  private finalizeSelection(result: PreviewResult, selectionMode: SelectionMode): void {
+    let finalMask: Uint8Array;
+    
+    // Apply feathering if enabled
+    const featheredMask = this.feather > 0 
+      ? this.applyFeather(new Uint8Array(result.mask), CANVAS_WIDTH, CANVAS_HEIGHT, this.feather)
+      : new Uint8Array(result.mask);
+    
+    // Handle add/subtract modes
+    if (this.currentMask && selectionMode !== 'replace') {
+      finalMask = new Uint8Array(CANVAS_WIDTH * CANVAS_HEIGHT);
+      
+      for (let i = 0; i < finalMask.length; i++) {
+        if (selectionMode === 'add') {
+          // Add: union of existing and new
+          finalMask[i] = Math.min(255, this.currentMask.data[i] + featheredMask[i]);
+        } else if (selectionMode === 'subtract') {
+          // Subtract: existing minus new
+          finalMask[i] = Math.max(0, this.currentMask.data[i] - featheredMask[i]);
+        }
+      }
+    } else {
+      finalMask = featheredMask;
+    }
+    
+    // Recalculate bounds for final mask
+    const bounds = this.calculateMaskBounds(finalMask, CANVAS_WIDTH, CANVAS_HEIGHT);
+    
     const mask: SelectionMask = {
-      data: new Uint8Array(result.mask),
+      data: finalMask,
       width: CANVAS_WIDTH,
       height: CANVAS_HEIGHT,
-      bounds: result.bounds,
+      bounds,
     };
     
     this.currentMask = mask;
     this.onSelectionChange?.(mask);
+  }
+
+  private calculateMaskBounds(mask: Uint8Array, width: number, height: number): { x: number; y: number; width: number; height: number } {
+    let minX = width, maxX = 0, minY = height, maxY = 0;
+    let hasSelection = false;
+    
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (mask[y * width + x] > 0) {
+          hasSelection = true;
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y);
+          maxY = Math.max(maxY, y);
+        }
+      }
+    }
+    
+    if (!hasSelection) {
+      return { x: 0, y: 0, width: 0, height: 0 };
+    }
+    
+    return {
+      x: minX,
+      y: minY,
+      width: maxX - minX + 1,
+      height: maxY - minY + 1,
+    };
+  }
+
+  /**
+   * Apply Gaussian-like feathering to the mask edges
+   */
+  private applyFeather(mask: Uint8Array, width: number, height: number, radius: number): Uint8Array {
+    if (radius <= 0) return mask;
+    
+    const result = new Uint8Array(width * height);
+    const kernelSize = Math.ceil(radius * 2) + 1;
+    const sigma = radius / 2;
+    
+    // Create Gaussian kernel
+    const kernel: number[] = [];
+    let kernelSum = 0;
+    for (let i = 0; i < kernelSize; i++) {
+      const x = i - Math.floor(kernelSize / 2);
+      const value = Math.exp(-(x * x) / (2 * sigma * sigma));
+      kernel.push(value);
+      kernelSum += value;
+    }
+    // Normalize kernel
+    for (let i = 0; i < kernelSize; i++) {
+      kernel[i] /= kernelSum;
+    }
+    
+    const halfKernel = Math.floor(kernelSize / 2);
+    
+    // Horizontal pass
+    const temp = new Float32Array(width * height);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        let sum = 0;
+        for (let k = 0; k < kernelSize; k++) {
+          const sx = Math.max(0, Math.min(width - 1, x + k - halfKernel));
+          sum += mask[y * width + sx] * kernel[k];
+        }
+        temp[y * width + x] = sum;
+      }
+    }
+    
+    // Vertical pass
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        let sum = 0;
+        for (let k = 0; k < kernelSize; k++) {
+          const sy = Math.max(0, Math.min(height - 1, y + k - halfKernel));
+          sum += temp[sy * width + x] * kernel[k];
+        }
+        result[y * width + x] = Math.round(sum);
+      }
+    }
+    
+    return result;
   }
 
   // ============================================

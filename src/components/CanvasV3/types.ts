@@ -182,4 +182,11 @@ export interface WandOptions {
   contiguous: boolean;
   antiAlias: boolean;
   feather: number;
+  connectivity: 4 | 8;
 }
+
+// ============================================
+// SELECTION MODE
+// ============================================
+
+export type SelectionMode = 'replace' | 'add' | 'subtract';

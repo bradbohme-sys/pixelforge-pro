@@ -53,16 +53,17 @@ export class CoordinateSystem {
   /**
    * Get the offset to center the image (CANVAS_WIDTH x CANVAS_HEIGHT) in the viewport
    * At zoom=1 and pan=0, the image should be centered
+   * 
+   * NOTE: Use CSS dimensions (rect) not buffer dimensions (canvas.width) because
+   * applyTransform is called AFTER the DPR scale is applied to the context
    */
   private getImageOffset(): { x: number; y: number } {
-    // Use the actual canvas buffer dimensions (already scaled by DPR)
-    const canvasWidth = this.canvasElement.width;
-    const canvasHeight = this.canvasElement.height;
+    const rect = this.getValidatedRect();
     
-    // Center the image in the canvas buffer
+    // Center the image in the CSS viewport
     return {
-      x: (canvasWidth - CANVAS_WIDTH * this._zoom) / 2,
-      y: (canvasHeight - CANVAS_HEIGHT * this._zoom) / 2,
+      x: (rect.width - CANVAS_WIDTH * this._zoom) / 2,
+      y: (rect.height - CANVAS_HEIGHT * this._zoom) / 2,
     };
   }
 

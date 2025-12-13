@@ -447,15 +447,22 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
 };
 
 // Helper to draw selection overlay with marching ants
+// Uses an offscreen canvas to create ImageData, then draws it with drawImage
+// so canvas transforms are properly applied
 function drawSelectionOverlay(
   ctx: CanvasRenderingContext2D,
   mask: SelectionMask,
   color: string,
   timestamp: number = 0
 ): void {
-  const { data, width, height } = mask;
+  const { data, width, height, bounds } = mask;
   
-  const imageData = ctx.createImageData(width, height);
+  // Create an offscreen canvas for the mask
+  const offscreen = new OffscreenCanvas(width, height);
+  const offCtx = offscreen.getContext('2d');
+  if (!offCtx) return;
+  
+  const imageData = offCtx.createImageData(width, height);
   const pixels = imageData.data;
   
   // Fill colors
@@ -504,7 +511,13 @@ function drawSelectionOverlay(
     }
   }
   
-  ctx.putImageData(imageData, 0, 0);
+  // Put image data on offscreen canvas
+  offCtx.putImageData(imageData, 0, 0);
+  
+  // Draw at the correct position (bounds offset) so it aligns with the layer
+  const offsetX = bounds?.x ?? 0;
+  const offsetY = bounds?.y ?? 0;
+  ctx.drawImage(offscreen, offsetX, offsetY);
 }
 
 export default CanvasV3;

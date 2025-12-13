@@ -2,13 +2,15 @@
  * CoordinateSystem - The Single Source of Truth for Coordinate Conversions
  * 
  * GOLDEN PATH RULE 2: All Conversions Go Through CoordinateSystem
+ * 
+ * FIX: Use dynamic viewport center based on actual canvas element dimensions,
+ * not fixed CANVAS_WIDTH/HEIGHT. This ensures the image is centered in the
+ * viewport regardless of container size.
  */
 
 import {
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
-  VIEWPORT_CENTER_X,
-  VIEWPORT_CENTER_Y,
   ZOOM_MIN,
   ZOOM_MAX,
   PAN_CONSTRAINT_RATIO,
@@ -46,6 +48,22 @@ export class CoordinateSystem {
       this.updateDpr();
     }
     return this.cachedDpr;
+  }
+
+  /**
+   * Get the offset to center the image (CANVAS_WIDTH x CANVAS_HEIGHT) in the viewport
+   * At zoom=1 and pan=0, the image should be centered
+   */
+  private getImageOffset(): { x: number; y: number } {
+    // Use the actual canvas buffer dimensions (already scaled by DPR)
+    const canvasWidth = this.canvasElement.width;
+    const canvasHeight = this.canvasElement.height;
+    
+    // Center the image in the canvas buffer
+    return {
+      x: (canvasWidth - CANVAS_WIDTH * this._zoom) / 2,
+      y: (canvasHeight - CANVAS_HEIGHT * this._zoom) / 2,
+    };
   }
 
   setPan(x: number, y: number): void {
@@ -98,30 +116,45 @@ export class CoordinateSystem {
     return this.cachedBrowserZoom;
   }
 
+  /**
+   * Convert screen coordinates to world (image) coordinates
+   * World coordinates are 0-CANVAS_WIDTH and 0-CANVAS_HEIGHT
+   */
   screenToWorld(screenX: number, screenY: number): Point {
     const rect = this.getValidatedRect();
+    const dpr = this.cachedDpr;
     
-    const scaleX = this.canvasElement.width / rect.width;
-    const scaleY = this.canvasElement.height / rect.height;
-    const canvasX = (screenX - rect.left) * scaleX;
-    const canvasY = (screenY - rect.top) * scaleY;
+    // Convert screen coords to canvas buffer coords
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
     
-    const worldX = (canvasX - VIEWPORT_CENTER_X - this._panX) / this._zoom;
-    const worldY = (canvasY - VIEWPORT_CENTER_Y - this._panY) / this._zoom;
+    // Get the offset where the image is drawn
+    const offset = this.getImageOffset();
+    
+    // Convert to world coords (accounting for pan and zoom)
+    const worldX = (canvasX - offset.x - this._panX) / this._zoom;
+    const worldY = (canvasY - offset.y - this._panY) / this._zoom;
     
     return { x: Math.floor(worldX), y: Math.floor(worldY) };
   }
 
+  /**
+   * Convert world (image) coordinates to screen coordinates
+   */
   worldToScreen(worldX: number, worldY: number): Point {
     const rect = this.getValidatedRect();
+    const dpr = this.cachedDpr;
     
-    const canvasX = worldX * this._zoom + VIEWPORT_CENTER_X + this._panX;
-    const canvasY = worldY * this._zoom + VIEWPORT_CENTER_Y + this._panY;
+    // Get the offset where the image is drawn
+    const offset = this.getImageOffset();
     
-    const scaleX = rect.width / this.canvasElement.width;
-    const scaleY = rect.height / this.canvasElement.height;
-    const screenX = canvasX * scaleX + rect.left;
-    const screenY = canvasY * scaleY + rect.top;
+    // Convert world to canvas buffer coords
+    const canvasX = worldX * this._zoom + offset.x + this._panX;
+    const canvasY = worldY * this._zoom + offset.y + this._panY;
+    
+    // Convert to screen coords
+    const screenX = canvasX / dpr + rect.left;
+    const screenY = canvasY / dpr + rect.top;
     
     return { x: Math.round(screenX), y: Math.round(screenY) };
   }
@@ -135,8 +168,13 @@ export class CoordinateSystem {
            worldY >= 0 && worldY < CANVAS_HEIGHT;
   }
 
+  /**
+   * Apply the transform to a canvas context for rendering
+   * This positions content so the image is centered in the viewport
+   */
   applyTransform(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D): void {
-    ctx.translate(VIEWPORT_CENTER_X + this._panX, VIEWPORT_CENTER_Y + this._panY);
+    const offset = this.getImageOffset();
+    ctx.translate(offset.x + this._panX, offset.y + this._panY);
     ctx.scale(this._zoom, this._zoom);
   }
 

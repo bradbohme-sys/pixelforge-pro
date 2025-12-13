@@ -64,6 +64,8 @@ export interface RingBFSState {
   seedR: number;
   seedG: number;
   seedB: number;
+  /** Connectivity mode */
+  connectivity: 4 | 8;
 }
 
 // ============================================

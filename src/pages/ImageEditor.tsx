@@ -17,6 +17,7 @@ const ImageEditor: React.FC = () => {
     contiguous: true,
     antiAlias: true,
     feather: 0,
+    connectivity: 4,
   });
   const [expansionMode, setExpansionMode] = useState<ExpansionMode>('fast');
   

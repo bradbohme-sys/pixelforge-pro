@@ -18,7 +18,7 @@ import {
   SELECTION_COLOR,
   HOVER_PREVIEW_COLOR,
 } from './constants';
-import type { CanvasState, Layer, ToolType, SelectionMask, HoverPreview, WandOptions } from './types';
+import type { CanvasState, Layer, ToolType, SelectionMask, HoverPreview, WandOptions, SelectionMode } from './types';
 import type { ExpansionMode } from './preview';
 
 // ============================================
@@ -268,6 +268,8 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     if (magicWandHandlerRef.current && wandOptions) {
       magicWandHandlerRef.current.tolerance = wandOptions.tolerance;
       magicWandHandlerRef.current.contiguous = wandOptions.contiguous;
+      magicWandHandlerRef.current.setConnectivity(wandOptions.connectivity);
+      magicWandHandlerRef.current.setFeather(wandOptions.feather);
       setCurrentTolerance(wandOptions.tolerance);
     }
   }, [wandOptions]);
@@ -319,7 +321,15 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     if (!coordSystemRef.current) return;
     
     if (activeTool === 'magic-wand' && magicWandHandlerRef.current) {
-      magicWandHandlerRef.current.handleClick(e.clientX, e.clientY);
+      // Determine selection mode based on modifiers
+      let selectionMode: SelectionMode = 'replace';
+      if (e.shiftKey) {
+        selectionMode = 'add';
+      } else if (e.altKey) {
+        selectionMode = 'subtract';
+      }
+      
+      magicWandHandlerRef.current.handleClick(e.clientX, e.clientY, selectionMode);
     }
   }, [activeTool]);
 

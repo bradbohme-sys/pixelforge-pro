@@ -120,16 +120,17 @@ export class CoordinateSystem {
   /**
    * Convert screen coordinates to world (image) coordinates
    * World coordinates are 0-CANVAS_WIDTH and 0-CANVAS_HEIGHT
+   * 
+   * All calculations in CSS space (not buffer space) for consistency
    */
   screenToWorld(screenX: number, screenY: number): Point {
     const rect = this.getValidatedRect();
-    const dpr = this.cachedDpr;
     
-    // Convert screen coords to canvas buffer coords
-    const canvasX = (screenX - rect.left) * dpr;
-    const canvasY = (screenY - rect.top) * dpr;
+    // Convert screen coords to CSS-relative coords (NOT buffer coords)
+    const canvasX = screenX - rect.left;
+    const canvasY = screenY - rect.top;
     
-    // Get the offset where the image is drawn
+    // Get the offset where the image is drawn (CSS space)
     const offset = this.getImageOffset();
     
     // Convert to world coords (accounting for pan and zoom)
@@ -144,18 +145,17 @@ export class CoordinateSystem {
    */
   worldToScreen(worldX: number, worldY: number): Point {
     const rect = this.getValidatedRect();
-    const dpr = this.cachedDpr;
     
-    // Get the offset where the image is drawn
+    // Get the offset where the image is drawn (CSS space)
     const offset = this.getImageOffset();
     
-    // Convert world to canvas buffer coords
+    // Convert world to CSS-relative coords
     const canvasX = worldX * this._zoom + offset.x + this._panX;
     const canvasY = worldY * this._zoom + offset.y + this._panY;
     
     // Convert to screen coords
-    const screenX = canvasX / dpr + rect.left;
-    const screenY = canvasY / dpr + rect.top;
+    const screenX = canvasX + rect.left;
+    const screenY = canvasY + rect.top;
     
     return { x: Math.round(screenX), y: Math.round(screenY) };
   }

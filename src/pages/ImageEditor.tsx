@@ -7,6 +7,7 @@ import { TopBar } from '@/components/editor/TopBar';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from '@/components/CanvasV3/constants';
 import type { ToolType, Layer, WandOptions, SelectionMask } from '@/components/CanvasV3/types';
 import type { ExpansionMode } from '@/components/CanvasV3/preview';
+import { discoverObjects, type DiscoveredPin } from '@/services/aiSegmentationService';
 import { toast } from 'sonner';
 
 const ImageEditor: React.FC = () => {
@@ -29,10 +30,15 @@ const ImageEditor: React.FC = () => {
   const [zoomPercent, setZoomPercent] = useState(100);
   const [currentSelection, setCurrentSelection] = useState<SelectionMask | null>(null);
   
+  // AI state
+  const [isAIProcessing, setIsAIProcessing] = useState(false);
+  const [discoveredPins, setDiscoveredPins] = useState<DiscoveredPin[]>([]);
+  
   // History (simplified)
   const [historyIndex, setHistoryIndex] = useState(-1);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // ============================================
   // LAYER OPERATIONS
@@ -187,6 +193,51 @@ const ImageEditor: React.FC = () => {
   }, []);
 
   // ============================================
+  // AI SEGMENTATION
+  // ============================================
+
+  const handleAIDiscover = useCallback(async () => {
+    if (layers.length === 0) {
+      toast.error('Import an image first');
+      return;
+    }
+    
+    setIsAIProcessing(true);
+    toast.info('AI analyzing image...');
+    
+    try {
+      // Create composite canvas for AI
+      const canvas = document.createElement('canvas');
+      canvas.width = CANVAS_WIDTH;
+      canvas.height = CANVAS_HEIGHT;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Failed to create canvas');
+      
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      
+      for (const layer of layers) {
+        if (!layer.visible || !layer.image) continue;
+        ctx.drawImage(layer.image, layer.bounds.x, layer.bounds.y, layer.bounds.width, layer.bounds.height);
+      }
+      
+      const imageBase64 = canvas.toDataURL('image/png');
+      const result = await discoverObjects(imageBase64, CANVAS_WIDTH, CANVAS_HEIGHT);
+      
+      if (result.success && result.pins) {
+        setDiscoveredPins(result.pins);
+        toast.success(`Found ${result.pins.length} objects`);
+      } else {
+        toast.error(result.error || 'AI discovery failed');
+      }
+    } catch (err) {
+      toast.error('AI discovery failed');
+    } finally {
+      setIsAIProcessing(false);
+    }
+  }, [layers]);
+
+  // ============================================
   // VIEW CONTROLS
   // ============================================
 
@@ -252,6 +303,8 @@ const ImageEditor: React.FC = () => {
             expansionMode={expansionMode}
             onWandOptionsChange={handleWandOptionsChange}
             onExpansionModeChange={setExpansionMode}
+            onAIDiscover={handleAIDiscover}
+            isAIProcessing={isAIProcessing}
           />
         )}
         

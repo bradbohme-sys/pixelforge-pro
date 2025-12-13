@@ -96,6 +96,24 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   const [cursorPosition, setCursorPosition] = useState<{ x: number; y: number } | null>(null);
   const [currentTolerance, setCurrentTolerance] = useState(wandOptions?.tolerance ?? 32);
 
+  // Refs for animation loop (to avoid stale closure)
+  const hoverPreviewRef = useRef<HoverPreview | null>(null);
+  const currentSelectionRef = useRef<SelectionMask | null>(null);
+  const activeToolRef = useRef<ToolType>(activeTool);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    hoverPreviewRef.current = hoverPreview;
+  }, [hoverPreview]);
+
+  useEffect(() => {
+    currentSelectionRef.current = currentSelection;
+  }, [currentSelection]);
+
+  useEffect(() => {
+    activeToolRef.current = activeTool;
+  }, [activeTool]);
+
   // ============================================
   // LAYER LOADING
   // ============================================
@@ -179,22 +197,24 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     renderPipelineRef.current.start(mainCanvas, coordSystemRef.current, stateRef);
     
     // Interaction render loop with marching ants
-    let lastTime = 0;
     const interactionLoop = (time: number) => {
       const ctx = interactionCanvas.getContext('2d');
       if (ctx && coordSystemRef.current) {
         ctx.clearRect(0, 0, interactionCanvas.width, interactionCanvas.height);
         
-        // Draw selection overlay with marching ants
-        if (currentSelection?.data) {
+        // Draw selection overlay with marching ants (use ref to avoid stale closure)
+        const selection = currentSelectionRef.current;
+        if (selection?.data) {
           ctx.save();
           coordSystemRef.current.applyTransform(ctx);
-          drawSelectionOverlay(ctx, currentSelection, SELECTION_COLOR, time);
+          drawSelectionOverlay(ctx, selection, SELECTION_COLOR, time);
           ctx.restore();
         }
         
-        // Draw hover preview
-        if (hoverPreview?.mask?.data && activeTool === 'magic-wand') {
+        // Draw hover preview (use ref to avoid stale closure)
+        const preview = hoverPreviewRef.current;
+        const currentTool = activeToolRef.current;
+        if (preview?.mask?.data && currentTool === 'magic-wand') {
           ctx.save();
           coordSystemRef.current.applyTransform(ctx);
           
@@ -202,11 +222,10 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
           magicWandHandlerRef.current?.drawInstantSeed(ctx);
           
           // Draw wave preview
-          drawSelectionOverlay(ctx, hoverPreview.mask, HOVER_PREVIEW_COLOR, time);
+          drawSelectionOverlay(ctx, preview.mask, HOVER_PREVIEW_COLOR, time);
           ctx.restore();
         }
       }
-      lastTime = time;
       interactionRafIdRef.current = requestAnimationFrame(interactionLoop);
     };
     interactionRafIdRef.current = requestAnimationFrame(interactionLoop);

@@ -13,8 +13,8 @@ import { RenderPipeline } from './RenderPipeline';
 import { PanZoomHandler } from './PanZoomHandler';
 import { V3MagicWandHandler } from './V3MagicWandHandler';
 import {
-  CANVAS_WIDTH,
-  CANVAS_HEIGHT,
+  DEFAULT_CANVAS_WIDTH,
+  DEFAULT_CANVAS_HEIGHT,
   SELECTION_COLOR,
   HOVER_PREVIEW_COLOR,
 } from './constants';
@@ -58,6 +58,8 @@ interface CanvasV3Props {
   activeTool: ToolType;
   wandOptions?: WandOptions;
   expansionMode?: ExpansionMode;
+  documentWidth?: number;
+  documentHeight?: number;
   onSelectionChange?: (mask: SelectionMask | null) => void;
   onZoomChange?: (zoom: number) => void;
   onToleranceChange?: (tolerance: number) => void;
@@ -73,6 +75,8 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   activeTool,
   wandOptions,
   expansionMode = 'fast',
+  documentWidth = DEFAULT_CANVAS_WIDTH,
+  documentHeight = DEFAULT_CANVAS_HEIGHT,
   onSelectionChange,
   onZoomChange,
   onToleranceChange,
@@ -200,8 +204,9 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     initializeHighDPICanvas(interactionCanvas);
     
     coordSystemRef.current = new CoordinateSystem(mainCanvas);
+    coordSystemRef.current.setDocumentSize(documentWidth, documentHeight);
     
-    renderPipelineRef.current = new RenderPipeline(CANVAS_WIDTH, CANVAS_HEIGHT);
+    renderPipelineRef.current = new RenderPipeline(documentWidth, documentHeight);
     renderPipelineRef.current.start(mainCanvas, coordSystemRef.current, stateRef);
     
     // Interaction render loop with marching ants
@@ -274,7 +279,7 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
       initializeHighDPICanvas(mainCanvas);
       initializeHighDPICanvas(interactionCanvas);
       coordSystemRef.current?.updateBounds();
-      renderPipelineRef.current?.resizeCache(CANVAS_WIDTH, CANVAS_HEIGHT);
+      // Note: resizeCache uses current document dimensions, not container resize
       renderPipelineRef.current?.markLayersDirty();
     });
     resizeObserver.observe(container);
@@ -316,6 +321,20 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
       panZoomHandlerRef.current.setPanMode(activeTool === 'pan');
     }
   }, [activeTool]);
+
+  // Update document dimensions when they change
+  useEffect(() => {
+    if (coordSystemRef.current) {
+      coordSystemRef.current.setDocumentSize(documentWidth, documentHeight);
+    }
+    if (renderPipelineRef.current) {
+      renderPipelineRef.current.resizeCache(documentWidth, documentHeight);
+      renderPipelineRef.current.markLayersDirty();
+    }
+    if (magicWandHandlerRef.current) {
+      magicWandHandlerRef.current.markImageDataDirty();
+    }
+  }, [documentWidth, documentHeight]);
 
   // ============================================
   // HANDLERS

@@ -2,16 +2,23 @@
  * V3 Canvas Constants
  * 
  * GOLDEN PATH RULE 5: No Magic Numbers
- * All constants centralized here. These are the ONLY places these numbers appear.
+ * All constants centralized here.
+ * 
+ * NOTE: Document dimensions are now DYNAMIC based on loaded image.
+ * DEFAULT_CANVAS_WIDTH/HEIGHT are only used as fallbacks when no image is loaded.
  */
 
-// Virtual canvas dimensions (the "document" size)
-export const CANVAS_WIDTH = 800;
-export const CANVAS_HEIGHT = 600;
+// Default document dimensions (fallback when no image loaded)
+export const DEFAULT_CANVAS_WIDTH = 800;
+export const DEFAULT_CANVAS_HEIGHT = 600;
 
-// Viewport center (camera's default look-at point)
-export const VIEWPORT_CENTER_X = CANVAS_WIDTH / 2;
-export const VIEWPORT_CENTER_Y = CANVAS_HEIGHT / 2;
+// DEPRECATED - kept for backward compat, use document dimensions from state
+export const CANVAS_WIDTH = DEFAULT_CANVAS_WIDTH;
+export const CANVAS_HEIGHT = DEFAULT_CANVAS_HEIGHT;
+
+// Viewport center (calculated dynamically now, these are defaults)
+export const VIEWPORT_CENTER_X = DEFAULT_CANVAS_WIDTH / 2;
+export const VIEWPORT_CENTER_Y = DEFAULT_CANVAS_HEIGHT / 2;
 
 // Colors - using CSS variables for theming
 export const WORKSPACE_BG = '#1a1a1f';

@@ -2,12 +2,12 @@
  * RenderPipeline - RAF-Driven Rendering Engine
  * 
  * GOLDEN PATH RULE 6: Render Loop is rAF + Refs (Not React State)
+ * 
+ * DYNAMIC DIMENSIONS: Now uses document dimensions from state instead of fixed constants.
  */
 
 import {
   FRAME_BUDGET_MS,
-  CANVAS_WIDTH,
-  CANVAS_HEIGHT,
   CHECKERBOARD_SIZE,
   CHECKERBOARD_LIGHT,
   CHECKERBOARD_DARK,
@@ -30,9 +30,15 @@ export class RenderPipeline {
   private coordSystem: CoordinateSystem | null = null;
   private stateRef: { current: CanvasState } | null = null;
   
+  // Dynamic document dimensions
+  private docWidth: number;
+  private docHeight: number;
+  
   private onRenderInteraction: ((ctx: CanvasRenderingContext2D, deltaTime: number) => void) | null = null;
 
   constructor(width: number, height: number) {
+    this.docWidth = width;
+    this.docHeight = height;
     this.layerCacheCanvas = new OffscreenCanvas(width, height);
     const ctx = this.layerCacheCanvas.getContext('2d');
     if (!ctx) {
@@ -142,13 +148,13 @@ export class RenderPipeline {
     // Draw checkerboard pattern for transparency
     if (this.checkerboardPattern) {
       ctx.fillStyle = this.checkerboardPattern;
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      ctx.fillRect(0, 0, this.docWidth, this.docHeight);
     }
     
     // Draw border
     ctx.strokeStyle = '#454549';
     ctx.lineWidth = 1;
-    ctx.strokeRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    ctx.strokeRect(0, 0, this.docWidth, this.docHeight);
     
     // Render each visible layer
     for (const layer of state.layers) {
@@ -182,6 +188,8 @@ export class RenderPipeline {
   }
 
   resizeCache(width: number, height: number): void {
+    this.docWidth = width;
+    this.docHeight = height;
     this.layerCacheCanvas = new OffscreenCanvas(width, height);
     const ctx = this.layerCacheCanvas.getContext('2d');
     if (ctx) {
@@ -189,5 +197,9 @@ export class RenderPipeline {
       this.createCheckerboardPattern();
     }
     this.layerCacheDirty = true;
+  }
+  
+  getDocumentSize(): { width: number; height: number } {
+    return { width: this.docWidth, height: this.docHeight };
   }
 }

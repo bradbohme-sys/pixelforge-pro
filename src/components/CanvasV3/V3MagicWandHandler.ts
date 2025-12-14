@@ -12,7 +12,6 @@
  */
 
 import { CoordinateSystem } from './CoordinateSystem';
-import { CANVAS_WIDTH, CANVAS_HEIGHT } from './constants';
 import type { SelectionMask, HoverPreview, Layer, Point, SelectionMode } from './types';
 import {
   PreviewWaveEngine,
@@ -139,16 +138,20 @@ export class V3MagicWandHandler {
       return this.cachedImageData;
     }
     
+    // Use dynamic document dimensions from coordinate system
+    const docWidth = this.coordSystem.documentWidth;
+    const docHeight = this.coordSystem.documentHeight;
+    
     const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = CANVAS_WIDTH;
-    tempCanvas.height = CANVAS_HEIGHT;
+    tempCanvas.width = docWidth;
+    tempCanvas.height = docHeight;
     const ctx = tempCanvas.getContext('2d');
     
     if (!ctx) return null;
     
     // Fill with white background
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    ctx.fillRect(0, 0, docWidth, docHeight);
     
     for (const layer of this.layers) {
       if (!layer.visible || !layer.image) continue;
@@ -174,7 +177,7 @@ export class V3MagicWandHandler {
     }
     
     try {
-      this.cachedImageData = ctx.getImageData(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      this.cachedImageData = ctx.getImageData(0, 0, docWidth, docHeight);
       this.imageDataDirty = false;
       return this.cachedImageData;
     } catch {
@@ -290,10 +293,13 @@ export class V3MagicWandHandler {
   private handleWaveProgress(result: PreviewResult): void {
     if (!this.isHovering) return;
     
+    const docWidth = this.coordSystem.documentWidth;
+    const docHeight = this.coordSystem.documentHeight;
+    
     const mask: SelectionMask = {
       data: new Uint8Array(result.mask),
-      width: CANVAS_WIDTH,
-      height: CANVAS_HEIGHT,
+      width: docWidth,
+      height: docHeight,
       bounds: result.bounds,
     };
     
@@ -312,16 +318,19 @@ export class V3MagicWandHandler {
   }
 
   private finalizeSelection(result: PreviewResult, selectionMode: SelectionMode): void {
+    const docWidth = this.coordSystem.documentWidth;
+    const docHeight = this.coordSystem.documentHeight;
+    
     let finalMask: Uint8Array;
     
     // Apply feathering if enabled
     const featheredMask = this.feather > 0 
-      ? this.applyFeather(new Uint8Array(result.mask), CANVAS_WIDTH, CANVAS_HEIGHT, this.feather)
+      ? this.applyFeather(new Uint8Array(result.mask), docWidth, docHeight, this.feather)
       : new Uint8Array(result.mask);
     
     // Handle add/subtract modes
     if (this.currentMask && selectionMode !== 'replace') {
-      finalMask = new Uint8Array(CANVAS_WIDTH * CANVAS_HEIGHT);
+      finalMask = new Uint8Array(docWidth * docHeight);
       
       for (let i = 0; i < finalMask.length; i++) {
         if (selectionMode === 'add') {
@@ -337,12 +346,12 @@ export class V3MagicWandHandler {
     }
     
     // Recalculate bounds for final mask
-    const bounds = this.calculateMaskBounds(finalMask, CANVAS_WIDTH, CANVAS_HEIGHT);
+    const bounds = this.calculateMaskBounds(finalMask, docWidth, docHeight);
     
     const mask: SelectionMask = {
       data: finalMask,
-      width: CANVAS_WIDTH,
-      height: CANVAS_HEIGHT,
+      width: docWidth,
+      height: docHeight,
       bounds,
     };
     

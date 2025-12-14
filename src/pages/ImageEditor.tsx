@@ -4,7 +4,7 @@ import { LeftToolbar } from '@/components/editor/LeftToolbar';
 import { LayersPanel } from '@/components/editor/LayersPanel';
 import { ToolSettingsPanel } from '@/components/editor/ToolSettingsPanel';
 import { TopBar } from '@/components/editor/TopBar';
-import { CANVAS_WIDTH, CANVAS_HEIGHT } from '@/components/CanvasV3/constants';
+import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT } from '@/components/CanvasV3/constants';
 import type { ToolType, Layer, WandOptions, SelectionMask } from '@/components/CanvasV3/types';
 import type { ExpansionMode } from '@/components/CanvasV3/preview';
 import { discoverObjects, type DiscoveredPin } from '@/services/aiSegmentationService';
@@ -25,6 +25,10 @@ const ImageEditor: React.FC = () => {
   // Layer state
   const [layers, setLayers] = useState<Layer[]>([]);
   const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
+  
+  // Dynamic document dimensions (based on first/primary image)
+  const [documentWidth, setDocumentWidth] = useState(DEFAULT_CANVAS_WIDTH);
+  const [documentHeight, setDocumentHeight] = useState(DEFAULT_CANVAS_HEIGHT);
   
   // Canvas state
   const [zoomPercent, setZoomPercent] = useState(100);
@@ -58,6 +62,16 @@ const ImageEditor: React.FC = () => {
       
       const img = new Image();
       img.onload = () => {
+        // Use the actual image dimensions for the document
+        const imgWidth = img.width;
+        const imgHeight = img.height;
+        
+        // If this is the first layer, set document dimensions to image size
+        if (layers.length === 0) {
+          setDocumentWidth(imgWidth);
+          setDocumentHeight(imgHeight);
+        }
+        
         const newLayer: Layer = {
           id: crypto.randomUUID(),
           name: file.name.replace(/\.[^/.]+$/, ''),
@@ -68,8 +82,9 @@ const ImageEditor: React.FC = () => {
           bounds: {
             x: 0,
             y: 0,
-            width: Math.min(img.width, CANVAS_WIDTH),
-            height: Math.min(img.height, CANVAS_HEIGHT),
+            // Use actual image dimensions
+            width: imgWidth,
+            height: imgHeight,
           },
           image: img,
           dataUrl,
@@ -78,7 +93,7 @@ const ImageEditor: React.FC = () => {
         
         setLayers(prev => [...prev, newLayer]);
         setActiveLayerId(newLayer.id);
-        toast.success(`Imported "${newLayer.name}"`);
+        toast.success(`Imported "${newLayer.name}" (${imgWidth}×${imgHeight})`);
       };
       img.src = dataUrl;
     };
@@ -86,7 +101,7 @@ const ImageEditor: React.FC = () => {
     
     // Reset input
     e.target.value = '';
-  }, []);
+  }, [layers.length]);
 
   const handleExport = useCallback(() => {
     if (layers.length === 0) {
@@ -94,16 +109,16 @@ const ImageEditor: React.FC = () => {
       return;
     }
     
-    // Create composite canvas
+    // Create composite canvas using current document dimensions
     const canvas = document.createElement('canvas');
-    canvas.width = CANVAS_WIDTH;
-    canvas.height = CANVAS_HEIGHT;
+    canvas.width = documentWidth;
+    canvas.height = documentHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
     // Draw white background
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    ctx.fillRect(0, 0, documentWidth, documentHeight);
     
     // Draw all visible layers
     for (const layer of layers) {
@@ -132,7 +147,7 @@ const ImageEditor: React.FC = () => {
     link.click();
     
     toast.success('Image exported');
-  }, [layers]);
+  }, [layers, documentWidth, documentHeight]);
 
   const handleAddLayer = useCallback(() => {
     handleImport();
@@ -206,15 +221,15 @@ const ImageEditor: React.FC = () => {
     toast.info('AI analyzing image...');
     
     try {
-      // Create composite canvas for AI
+      // Create composite canvas for AI using current document dimensions
       const canvas = document.createElement('canvas');
-      canvas.width = CANVAS_WIDTH;
-      canvas.height = CANVAS_HEIGHT;
+      canvas.width = documentWidth;
+      canvas.height = documentHeight;
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Failed to create canvas');
       
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      ctx.fillRect(0, 0, documentWidth, documentHeight);
       
       for (const layer of layers) {
         if (!layer.visible || !layer.image) continue;
@@ -222,7 +237,7 @@ const ImageEditor: React.FC = () => {
       }
       
       const imageBase64 = canvas.toDataURL('image/png');
-      const result = await discoverObjects(imageBase64, CANVAS_WIDTH, CANVAS_HEIGHT);
+      const result = await discoverObjects(imageBase64, documentWidth, documentHeight);
       
       if (result.success && result.pins) {
         setDiscoveredPins(result.pins);
@@ -235,7 +250,7 @@ const ImageEditor: React.FC = () => {
     } finally {
       setIsAIProcessing(false);
     }
-  }, [layers]);
+  }, [layers, documentWidth, documentHeight]);
 
   // ============================================
   // VIEW CONTROLS
@@ -315,6 +330,8 @@ const ImageEditor: React.FC = () => {
             activeTool={activeTool}
             wandOptions={wandOptions}
             expansionMode={expansionMode}
+            documentWidth={documentWidth}
+            documentHeight={documentHeight}
             onZoomChange={handleZoomChange}
             onSelectionChange={handleSelectionChange}
             onToleranceChange={(tol) => setWandOptions(prev => ({ ...prev, tolerance: tol }))}

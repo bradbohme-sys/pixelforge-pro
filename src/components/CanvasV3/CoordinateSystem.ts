@@ -3,14 +3,13 @@
  * 
  * GOLDEN PATH RULE 2: All Conversions Go Through CoordinateSystem
  * 
- * FIX: Use dynamic viewport center based on actual canvas element dimensions,
- * not fixed CANVAS_WIDTH/HEIGHT. This ensures the image is centered in the
- * viewport regardless of container size.
+ * DYNAMIC DIMENSIONS: Document size is now dynamic based on loaded image.
+ * All coordinate calculations use the current document dimensions.
  */
 
 import {
-  CANVAS_WIDTH,
-  CANVAS_HEIGHT,
+  DEFAULT_CANVAS_WIDTH,
+  DEFAULT_CANVAS_HEIGHT,
   ZOOM_MIN,
   ZOOM_MAX,
   PAN_CONSTRAINT_RATIO,
@@ -26,6 +25,10 @@ export class CoordinateSystem {
   private _panY: number = 0;
   private _zoom: number = 1;
   
+  // Dynamic document dimensions
+  private _documentWidth: number = DEFAULT_CANVAS_WIDTH;
+  private _documentHeight: number = DEFAULT_CANVAS_HEIGHT;
+  
   private cachedRect: DOMRect | null = null;
   private cachedDpr: number = 1;
   private lastDprCheck: number = 0;
@@ -36,6 +39,15 @@ export class CoordinateSystem {
     this.canvasElement = canvasElement;
     this.updateBounds();
     this.updateDpr();
+  }
+  
+  // Document dimension getters/setters
+  get documentWidth(): number { return this._documentWidth; }
+  get documentHeight(): number { return this._documentHeight; }
+  
+  setDocumentSize(width: number, height: number): void {
+    this._documentWidth = width;
+    this._documentHeight = height;
   }
 
   get panX(): number { return this._panX; }
@@ -51,8 +63,8 @@ export class CoordinateSystem {
   }
 
   /**
-   * Get the offset to center the image (CANVAS_WIDTH x CANVAS_HEIGHT) in the viewport
-   * At zoom=1 and pan=0, the image should be centered
+   * Get the offset to center the document in the viewport
+   * At zoom=1 and pan=0, the document should be centered
    * 
    * NOTE: Use CSS dimensions (rect) not buffer dimensions (canvas.width) because
    * applyTransform is called AFTER the DPR scale is applied to the context
@@ -60,10 +72,10 @@ export class CoordinateSystem {
   private getImageOffset(): { x: number; y: number } {
     const rect = this.getValidatedRect();
     
-    // Center the image in the CSS viewport
+    // Center the document in the CSS viewport
     return {
-      x: (rect.width - CANVAS_WIDTH * this._zoom) / 2,
-      y: (rect.height - CANVAS_HEIGHT * this._zoom) / 2,
+      x: (rect.width - this._documentWidth * this._zoom) / 2,
+      y: (rect.height - this._documentHeight * this._zoom) / 2,
     };
   }
 
@@ -165,8 +177,8 @@ export class CoordinateSystem {
   }
 
   isInBounds(worldX: number, worldY: number): boolean {
-    return worldX >= 0 && worldX < CANVAS_WIDTH && 
-           worldY >= 0 && worldY < CANVAS_HEIGHT;
+    return worldX >= 0 && worldX < this._documentWidth && 
+           worldY >= 0 && worldY < this._documentHeight;
   }
 
   /**
@@ -210,8 +222,8 @@ export class CoordinateSystem {
   }
 
   private constrainPan(): void {
-    const maxPanX = CANVAS_WIDTH * PAN_CONSTRAINT_RATIO;
-    const maxPanY = CANVAS_HEIGHT * PAN_CONSTRAINT_RATIO;
+    const maxPanX = this._documentWidth * PAN_CONSTRAINT_RATIO;
+    const maxPanY = this._documentHeight * PAN_CONSTRAINT_RATIO;
     this._panX = Math.max(-maxPanX, Math.min(maxPanX, this._panX));
     this._panY = Math.max(-maxPanY, Math.min(maxPanY, this._panY));
   }

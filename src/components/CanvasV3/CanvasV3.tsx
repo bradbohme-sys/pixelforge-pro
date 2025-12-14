@@ -543,10 +543,9 @@ function drawSelectionOverlay(
   // Put image data on offscreen canvas
   offCtx.putImageData(imageData, 0, 0);
   
-  // Draw at the correct position (bounds offset) so it aligns with the layer
-  const offsetX = bounds?.x ?? 0;
-  const offsetY = bounds?.y ?? 0;
-  ctx.drawImage(offscreen, offsetX, offsetY);
+  // Draw at 0,0 - the mask data is already in full document space
+  // (bounds is just for knowing where the selection exists, not for offsetting)
+  ctx.drawImage(offscreen, 0, 0);
 }
 
 export default CanvasV3;

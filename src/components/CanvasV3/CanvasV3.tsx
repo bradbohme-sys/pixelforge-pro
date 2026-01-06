@@ -1,10 +1,12 @@
 /**
  * CanvasV3 - The Main V3 Canvas Component
  * 
- * V6 Features:
+ * V7 Features:
  * - Organic wave preview on hover
  * - Scroll wheel adjusts tolerance live
  * - Zero-latency seed feedback
+ * - Integrated Lasso system with multiple variants
+ * - Edge map debug overlay
  */
 
 import React, { useRef, useLayoutEffect, useState, useCallback, useEffect } from 'react';
@@ -20,6 +22,15 @@ import {
 } from './constants';
 import type { CanvasState, Layer, ToolType, SelectionMask, HoverPreview, WandOptions, SelectionMode } from './types';
 import type { ExpansionMode } from './preview';
+import { 
+  createLassoHandler, 
+  BaseLassoHandler,
+  type LassoSettings,
+  type LassoPath,
+  type LassoMetrics,
+  type EdgeMap,
+  DEFAULT_LASSO_SETTINGS,
+} from './lasso';
 
 // ============================================
 // HIGH-DPI INITIALIZATION
@@ -27,25 +38,17 @@ import type { ExpansionMode } from './preview';
 
 /**
  * Initialize canvas for high-DPI displays.
- * 
- * IMPORTANT: We set the canvas buffer size to CSS size × DPR, but we do NOT
- * apply a global ctx.scale(dpr, dpr). Instead, we handle DPR in the coordinate
- * system's applyTransform method. This keeps all our coordinate math in CSS space.
  */
 function initializeHighDPICanvas(canvas: HTMLCanvasElement): number {
   const rect = canvas.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
   
-  // Set buffer size (physical pixels)
   canvas.width = rect.width * dpr;
   canvas.height = rect.height * dpr;
   
-  // Set CSS size
   canvas.style.width = `${rect.width}px`;
   canvas.style.height = `${rect.height}px`;
   
-  // Return DPR so caller can use it - but do NOT apply global scale here
-  // The CoordinateSystem.applyTransform will handle all scaling
   return dpr;
 }
 
@@ -57,12 +60,16 @@ interface CanvasV3Props {
   layers: Layer[];
   activeTool: ToolType;
   wandOptions?: WandOptions;
+  lassoSettings?: LassoSettings;
   expansionMode?: ExpansionMode;
   documentWidth?: number;
   documentHeight?: number;
+  showEdgeMapOverlay?: boolean;
+  edgeMapColorScheme?: 'heat' | 'grayscale' | 'direction';
   onSelectionChange?: (mask: SelectionMask | null) => void;
   onZoomChange?: (zoom: number) => void;
   onToleranceChange?: (tolerance: number) => void;
+  onLassoMetricsChange?: (metrics: LassoMetrics) => void;
   onError?: (message: string) => void;
 }
 
@@ -74,12 +81,16 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   layers,
   activeTool,
   wandOptions,
+  lassoSettings,
   expansionMode = 'fast',
   documentWidth = DEFAULT_CANVAS_WIDTH,
   documentHeight = DEFAULT_CANVAS_HEIGHT,
+  showEdgeMapOverlay = false,
+  edgeMapColorScheme = 'heat',
   onSelectionChange,
   onZoomChange,
   onToleranceChange,
+  onLassoMetricsChange,
   onError,
 }) => {
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -90,6 +101,7 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   const renderPipelineRef = useRef<RenderPipeline | null>(null);
   const panZoomHandlerRef = useRef<PanZoomHandler | null>(null);
   const magicWandHandlerRef = useRef<V3MagicWandHandler | null>(null);
+  const lassoHandlerRef = useRef<BaseLassoHandler | null>(null);
   const interactionRafIdRef = useRef<number | null>(null);
   
   const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
@@ -107,11 +119,14 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [cursorPosition, setCursorPosition] = useState<{ x: number; y: number } | null>(null);
   const [currentTolerance, setCurrentTolerance] = useState(wandOptions?.tolerance ?? 32);
+  const [lassoPath, setLassoPath] = useState<LassoPath | null>(null);
+  const [edgeMap, setEdgeMap] = useState<EdgeMap | null>(null);
 
   // Refs for animation loop (to avoid stale closure)
   const hoverPreviewRef = useRef<HoverPreview | null>(null);
   const currentSelectionRef = useRef<SelectionMask | null>(null);
   const activeToolRef = useRef<ToolType>(activeTool);
+  const lassoHandlerStateRef = useRef<BaseLassoHandler | null>(null);
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -125,6 +140,10 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   useEffect(() => {
     activeToolRef.current = activeTool;
   }, [activeTool]);
+
+  useEffect(() => {
+    lassoHandlerStateRef.current = lassoHandlerRef.current;
+  });
 
   // ============================================
   // LAYER LOADING
@@ -184,10 +203,110 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
       if (magicWandHandlerRef.current) {
         magicWandHandlerRef.current.updateLayers(loadedLayers, imageCache.current);
       }
+      
+      // Update lasso handler layers
+      if (lassoHandlerRef.current) {
+        lassoHandlerRef.current.updateLayers(loadedLayers, imageCache.current);
+      }
     };
     
     loadAllImages();
   }, [layers, loadLayerImage]);
+
+  // ============================================
+  // LASSO HANDLER INITIALIZATION
+  // ============================================
+
+  useEffect(() => {
+    if (!coordSystemRef.current) return;
+    
+    const variant = lassoSettings?.variant ?? DEFAULT_LASSO_SETTINGS.variant;
+    
+    // Create new lasso handler
+    lassoHandlerRef.current = createLassoHandler(
+      variant,
+      coordSystemRef.current,
+      stateRef.current.layers,
+      imageCache.current
+    );
+    
+    // Apply settings
+    if (lassoSettings) {
+      lassoHandlerRef.current.updateSettings(lassoSettings);
+    }
+    
+    // Set callbacks
+    lassoHandlerRef.current.setOnPathChange((path) => {
+      setLassoPath(path);
+    });
+    
+    lassoHandlerRef.current.setOnSelectionComplete((mask) => {
+      setCurrentSelection(mask);
+      onSelectionChange?.(mask);
+    });
+    
+    lassoHandlerRef.current.setOnMetricsUpdate((metrics) => {
+      onLassoMetricsChange?.(metrics);
+      // Update edge map for debug overlay
+      const em = lassoHandlerRef.current?.['edgeEngine']?.getEdgeMap();
+      if (em) setEdgeMap(em);
+    });
+    
+    lassoHandlerRef.current.setOnError((msg) => {
+      setError(msg);
+      onError?.(msg);
+    });
+    
+    return () => {
+      lassoHandlerRef.current = null;
+    };
+  }, [lassoSettings?.variant, onSelectionChange, onLassoMetricsChange, onError]);
+
+  // Update lasso settings when they change
+  useEffect(() => {
+    if (lassoHandlerRef.current && lassoSettings) {
+      lassoHandlerRef.current.updateSettings(lassoSettings);
+    }
+  }, [lassoSettings]);
+
+  // ============================================
+  // KEYBOARD SHORTCUTS FOR LASSO
+  // ============================================
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if in input field
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      
+      if (activeTool !== 'lasso' || !lassoHandlerRef.current) return;
+      
+      const state = lassoHandlerRef.current.getState();
+      
+      if (e.key === 'Escape') {
+        // Cancel lasso
+        e.preventDefault();
+        lassoHandlerRef.current.cancel();
+        setLassoPath(null);
+      } else if (e.key === 'Backspace' || e.key === 'Delete') {
+        // Undo last anchor
+        e.preventDefault();
+        if (state === 'drawing' && 'undoLastAnchor' in lassoHandlerRef.current) {
+          (lassoHandlerRef.current as any).undoLastAnchor();
+        }
+      } else if (e.key === 'Enter') {
+        // Complete lasso
+        e.preventDefault();
+        if (state === 'drawing') {
+          lassoHandlerRef.current.complete();
+        }
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTool]);
 
   // ============================================
   // INITIALIZATION
@@ -209,15 +328,22 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     renderPipelineRef.current = new RenderPipeline(documentWidth, documentHeight);
     renderPipelineRef.current.start(mainCanvas, coordSystemRef.current, stateRef);
     
-    // Interaction render loop with marching ants
+    // Interaction render loop with marching ants and lasso
     const interactionLoop = (time: number) => {
       const ctx = interactionCanvas.getContext('2d');
       if (ctx && coordSystemRef.current) {
-        // Clear entire buffer (use buffer dimensions)
-        ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform first
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, interactionCanvas.width, interactionCanvas.height);
         
-        // Draw selection overlay with marching ants (use ref to avoid stale closure)
+        // Draw edge map overlay if enabled
+        if (showEdgeMapOverlay && edgeMap) {
+          ctx.save();
+          coordSystemRef.current.applyTransform(ctx);
+          drawEdgeMapOverlay(ctx, edgeMap, edgeMapColorScheme);
+          ctx.restore();
+        }
+        
+        // Draw selection overlay with marching ants
         const selection = currentSelectionRef.current;
         if (selection?.data) {
           ctx.save();
@@ -226,18 +352,23 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
           ctx.restore();
         }
         
-        // Draw hover preview (use ref to avoid stale closure)
+        // Draw hover preview for magic wand
         const preview = hoverPreviewRef.current;
         const currentTool = activeToolRef.current;
         if (preview?.mask?.data && currentTool === 'magic-wand') {
           ctx.save();
           coordSystemRef.current.applyTransform(ctx);
-          
-          // Draw zero-latency seed highlight
           magicWandHandlerRef.current?.drawInstantSeed(ctx);
-          
-          // Draw wave preview
           drawSelectionOverlay(ctx, preview.mask, HOVER_PREVIEW_COLOR, time);
+          ctx.restore();
+        }
+        
+        // Draw lasso path
+        const lassoHandler = lassoHandlerStateRef.current;
+        if (lassoHandler && currentTool === 'lasso') {
+          ctx.save();
+          coordSystemRef.current.applyTransform(ctx);
+          lassoHandler.draw(ctx);
           ctx.restore();
         }
       }
@@ -279,7 +410,6 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
       initializeHighDPICanvas(mainCanvas);
       initializeHighDPICanvas(interactionCanvas);
       coordSystemRef.current?.updateBounds();
-      // Note: resizeCache uses current document dimensions, not container resize
       renderPipelineRef.current?.markLayersDirty();
     });
     resizeObserver.observe(container);
@@ -295,7 +425,7 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
         cancelAnimationFrame(interactionRafIdRef.current);
       }
     };
-  }, []);
+  }, [showEdgeMapOverlay, edgeMapColorScheme]);
 
   // Update wand options
   useEffect(() => {
@@ -334,6 +464,9 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     if (magicWandHandlerRef.current) {
       magicWandHandlerRef.current.markImageDataDirty();
     }
+    if (lassoHandlerRef.current) {
+      lassoHandlerRef.current.markImageDataDirty();
+    }
   }, [documentWidth, documentHeight]);
 
   // ============================================
@@ -363,13 +496,16 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     if (activeTool === 'magic-wand' && magicWandHandlerRef.current) {
       magicWandHandlerRef.current.handleHover(e.clientX, e.clientY);
     }
+    
+    if (activeTool === 'lasso' && lassoHandlerRef.current) {
+      lassoHandlerRef.current.handleMove(e.clientX, e.clientY);
+    }
   }, [activeTool]);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     if (!coordSystemRef.current) return;
     
     if (activeTool === 'magic-wand' && magicWandHandlerRef.current) {
-      // Determine selection mode based on modifiers
       let selectionMode: SelectionMode = 'replace';
       if (e.shiftKey) {
         selectionMode = 'add';
@@ -378,6 +514,18 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
       }
       
       magicWandHandlerRef.current.handleClick(e.clientX, e.clientY, selectionMode);
+    }
+    
+    if (activeTool === 'lasso' && lassoHandlerRef.current) {
+      lassoHandlerRef.current.handleClick(e.clientX, e.clientY);
+    }
+  }, [activeTool]);
+
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    if (!coordSystemRef.current) return;
+    
+    if (activeTool === 'lasso' && lassoHandlerRef.current) {
+      lassoHandlerRef.current.handleDoubleClick(e.clientX, e.clientY);
     }
   }, [activeTool]);
 
@@ -390,7 +538,6 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   }, []);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
-    // If magic wand is active and hovering, use wheel for tolerance
     if (activeTool === 'magic-wand' && magicWandHandlerRef.current) {
       const isHovering = hoverPreview !== null || cursorPosition !== null;
       
@@ -401,8 +548,6 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
         return;
       }
     }
-    
-    // Otherwise let PanZoomHandler handle it
   }, [activeTool, hoverPreview, cursorPosition]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -434,6 +579,7 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
         onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
         onWheelCapture={handleWheel}
       />
       
@@ -544,8 +690,85 @@ function drawSelectionOverlay(
   offCtx.putImageData(imageData, 0, 0);
   
   // Draw at 0,0 - the mask data is already in full document space
-  // (bounds is just for knowing where the selection exists, not for offsetting)
   ctx.drawImage(offscreen, 0, 0);
+}
+
+/**
+ * Draw edge map as a heatmap overlay
+ */
+function drawEdgeMapOverlay(
+  ctx: CanvasRenderingContext2D,
+  edgeMap: EdgeMap,
+  colorScheme: 'heat' | 'grayscale' | 'direction' = 'heat'
+): void {
+  const { magnitude, direction, width, height } = edgeMap;
+  
+  const offscreen = new OffscreenCanvas(width, height);
+  const offCtx = offscreen.getContext('2d');
+  if (!offCtx) return;
+  
+  const imageData = offCtx.createImageData(width, height);
+  const pixels = imageData.data;
+  
+  for (let i = 0; i < magnitude.length; i++) {
+    const mag = magnitude[i];
+    const dir = direction[i];
+    const idx = i * 4;
+    
+    let r: number, g: number, b: number;
+    
+    if (colorScheme === 'heat') {
+      // Heatmap: blue -> cyan -> green -> yellow -> red
+      const v = Math.max(0, Math.min(1, mag));
+      if (v < 0.25) {
+        const t = v / 0.25;
+        r = 0; g = Math.floor(t * 255); b = 255;
+      } else if (v < 0.5) {
+        const t = (v - 0.25) / 0.25;
+        r = 0; g = 255; b = Math.floor((1 - t) * 255);
+      } else if (v < 0.75) {
+        const t = (v - 0.5) / 0.25;
+        r = Math.floor(t * 255); g = 255; b = 0;
+      } else {
+        const t = (v - 0.75) / 0.25;
+        r = 255; g = Math.floor((1 - t) * 255); b = 0;
+      }
+    } else if (colorScheme === 'direction') {
+      // Direction hue wheel
+      const hue = ((dir + Math.PI) / (2 * Math.PI)) * 360;
+      const l = 0.2 + mag * 0.6;
+      const c = (1 - Math.abs(2 * l - 1));
+      const x = c * (1 - Math.abs((hue / 60) % 2 - 1));
+      const m = l - c / 2;
+      
+      if (hue < 60) { r = c; g = x; b = 0; }
+      else if (hue < 120) { r = x; g = c; b = 0; }
+      else if (hue < 180) { r = 0; g = c; b = x; }
+      else if (hue < 240) { r = 0; g = x; b = c; }
+      else if (hue < 300) { r = x; g = 0; b = c; }
+      else { r = c; g = 0; b = x; }
+      
+      r = Math.floor((r + m) * 255);
+      g = Math.floor((g + m) * 255);
+      b = Math.floor((b + m) * 255);
+    } else {
+      // Grayscale
+      r = g = b = Math.floor(mag * 255);
+    }
+    
+    pixels[idx] = r;
+    pixels[idx + 1] = g;
+    pixels[idx + 2] = b;
+    pixels[idx + 3] = Math.floor(mag * 180); // Alpha based on magnitude
+  }
+  
+  offCtx.putImageData(imageData, 0, 0);
+  
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  ctx.globalCompositeOperation = 'screen';
+  ctx.drawImage(offscreen, 0, 0);
+  ctx.restore();
 }
 
 export default CanvasV3;

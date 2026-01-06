@@ -3,10 +3,17 @@ import { CanvasV3 } from '@/components/CanvasV3/CanvasV3';
 import { LeftToolbar } from '@/components/editor/LeftToolbar';
 import { LayersPanel } from '@/components/editor/LayersPanel';
 import { ToolSettingsPanel } from '@/components/editor/ToolSettingsPanel';
+import { LassoSettingsPanel } from '@/components/editor/LassoSettingsPanel';
 import { TopBar } from '@/components/editor/TopBar';
 import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT } from '@/components/CanvasV3/constants';
 import type { ToolType, Layer, WandOptions, SelectionMask } from '@/components/CanvasV3/types';
 import type { ExpansionMode } from '@/components/CanvasV3/preview';
+import { 
+  DEFAULT_LASSO_SETTINGS, 
+  type LassoSettings, 
+  type LassoVariant,
+  type LassoMetrics 
+} from '@/components/CanvasV3/lasso';
 import { discoverObjects, type DiscoveredPin } from '@/services/aiSegmentationService';
 import { toast } from 'sonner';
 
@@ -21,6 +28,20 @@ const ImageEditor: React.FC = () => {
     connectivity: 4,
   });
   const [expansionMode, setExpansionMode] = useState<ExpansionMode>('fast');
+  
+  // Lasso state
+  const [lassoSettings, setLassoSettings] = useState<LassoSettings>(DEFAULT_LASSO_SETTINGS);
+  const [lassoMetrics, setLassoMetrics] = useState<LassoMetrics>({
+    fps: 0,
+    pathComputeMs: 0,
+    totalPoints: 0,
+    anchorCount: 0,
+    edgeQuality: 0,
+    cursorInfluence: 0,
+    cursorSpeed: 0,
+  });
+  const [showEdgeMapOverlay, setShowEdgeMapOverlay] = useState(false);
+  const [edgeMapColorScheme, setEdgeMapColorScheme] = useState<'heat' | 'grayscale' | 'direction'>('heat');
   
   // Layer state
   const [layers, setLayers] = useState<Layer[]>([]);
@@ -323,18 +344,36 @@ const ImageEditor: React.FC = () => {
           />
         )}
         
+        {/* Lasso settings panel */}
+        {activeTool === 'lasso' && (
+          <LassoSettingsPanel
+            settings={lassoSettings}
+            metrics={lassoMetrics}
+            showEdgeMapOverlay={showEdgeMapOverlay}
+            edgeMapColorScheme={edgeMapColorScheme}
+            onSettingsChange={(partial) => setLassoSettings(prev => ({ ...prev, ...partial }))}
+            onVariantChange={(variant) => setLassoSettings(prev => ({ ...prev, variant }))}
+            onShowEdgeMapOverlayChange={setShowEdgeMapOverlay}
+            onEdgeMapColorSchemeChange={setEdgeMapColorScheme}
+          />
+        )}
+        
         {/* Canvas area */}
         <div className="flex-1 relative">
           <CanvasV3
             layers={layers}
             activeTool={activeTool}
             wandOptions={wandOptions}
+            lassoSettings={lassoSettings}
             expansionMode={expansionMode}
             documentWidth={documentWidth}
             documentHeight={documentHeight}
+            showEdgeMapOverlay={showEdgeMapOverlay && activeTool === 'lasso'}
+            edgeMapColorScheme={edgeMapColorScheme}
             onZoomChange={handleZoomChange}
             onSelectionChange={handleSelectionChange}
             onToleranceChange={(tol) => setWandOptions(prev => ({ ...prev, tolerance: tol }))}
+            onLassoMetricsChange={setLassoMetrics}
             onError={handleError}
           />
         </div>

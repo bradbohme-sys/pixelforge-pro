@@ -16,15 +16,23 @@ import type {
 interface LassoSettingsPanelProps {
   settings: LassoSettings;
   metrics: LassoMetrics;
+  showEdgeMapOverlay?: boolean;
+  edgeMapColorScheme?: 'heat' | 'grayscale' | 'direction';
   onSettingsChange: (settings: Partial<LassoSettings>) => void;
   onVariantChange: (variant: LassoVariant) => void;
+  onShowEdgeMapOverlayChange?: (show: boolean) => void;
+  onEdgeMapColorSchemeChange?: (scheme: 'heat' | 'grayscale' | 'direction') => void;
 }
 
 export const LassoSettingsPanel: React.FC<LassoSettingsPanelProps> = ({
   settings,
   metrics,
+  showEdgeMapOverlay = false,
+  edgeMapColorScheme = 'heat',
   onSettingsChange,
   onVariantChange,
+  onShowEdgeMapOverlayChange,
+  onEdgeMapColorSchemeChange,
 }) => {
   const variantDescriptions: Record<LassoVariant, string> = {
     'classic-dijkstra': 'Pure edge following with manual anchors',
@@ -453,6 +461,36 @@ export const LassoSettingsPanel: React.FC<LassoSettingsPanelProps> = ({
                 visualization: { ...settings.visualization, showPredictionZone: v }
               })}
             />
+          </div>
+
+          {/* Edge Map Overlay */}
+          <div className="pt-2 border-t border-border/50 space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Edge Map Overlay</Label>
+              <Switch
+                checked={showEdgeMapOverlay}
+                onCheckedChange={onShowEdgeMapOverlayChange}
+              />
+            </div>
+            
+            {showEdgeMapOverlay && (
+              <div className="space-y-2">
+                <Label className="text-xs">Color Scheme</Label>
+                <Select 
+                  value={edgeMapColorScheme} 
+                  onValueChange={(v) => onEdgeMapColorSchemeChange?.(v as 'heat' | 'grayscale' | 'direction')}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="heat">Heatmap (Blue→Red)</SelectItem>
+                    <SelectItem value="grayscale">Grayscale</SelectItem>
+                    <SelectItem value="direction">Direction (Hue Wheel)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
         </TabsContent>
       </Tabs>

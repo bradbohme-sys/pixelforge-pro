@@ -7,14 +7,16 @@ export { EdgeDetectionEngine } from './EdgeDetectionEngine';
 export { PathfindingEngine } from './PathfindingEngine';
 export { LazyCursor } from './LazyCursor';
 export { BaseLassoHandler } from './BaseLassoHandler';
+export type { LassoState } from './BaseLassoHandler';
 export { ClassicDijkstraLasso } from './ClassicDijkstraLasso';
 export { PhotoshopAutoLasso } from './PhotoshopAutoLasso';
 export { ElasticProgressiveLasso } from './ElasticProgressiveLasso';
 export { PredictiveDirectionalLasso } from './PredictiveDirectionalLasso';
+export { EdgeMapOverlay, useEdgeMapBitmap } from './EdgeMapOverlay';
 
 import type { CoordinateSystem } from '../CoordinateSystem';
 import type { Layer } from '../types';
-import type { LassoVariant, LassoSettings } from './types';
+import type { LassoVariant } from './types';
 import { BaseLassoHandler } from './BaseLassoHandler';
 import { ClassicDijkstraLasso } from './ClassicDijkstraLasso';
 import { PhotoshopAutoLasso } from './PhotoshopAutoLasso';

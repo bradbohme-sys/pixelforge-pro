@@ -490,6 +490,9 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (!coordSystemRef.current) return;
     
+    // Skip tool processing during pan/zoom to avoid expensive recalculations
+    if (panZoomHandlerRef.current?.isInteracting) return;
+    
     const worldPoint = coordSystemRef.current.screenToWorld(e.clientX, e.clientY);
     setCursorPosition(worldPoint);
     
@@ -504,6 +507,9 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     if (!coordSystemRef.current) return;
+    
+    // Skip tool processing during pan/zoom 
+    if (panZoomHandlerRef.current?.isInteracting) return;
     
     if (activeTool === 'magic-wand' && magicWandHandlerRef.current) {
       let selectionMode: SelectionMode = 'replace';
@@ -523,6 +529,9 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
 
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
     if (!coordSystemRef.current) return;
+    
+    // Skip tool processing during pan/zoom 
+    if (panZoomHandlerRef.current?.isInteracting) return;
     
     if (activeTool === 'lasso' && lassoHandlerRef.current) {
       lassoHandlerRef.current.handleDoubleClick(e.clientX, e.clientY);

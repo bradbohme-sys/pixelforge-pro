@@ -12,6 +12,8 @@ export class PanZoomHandler {
   private canvas: HTMLCanvasElement;
   
   private isDragging: boolean = false;
+  private isWheelActive: boolean = false;
+  private wheelTimeout: number | null = null;
   private lastPointerX: number = 0;
   private lastPointerY: number = 0;
   private pointerId: number | null = null;
@@ -26,6 +28,14 @@ export class PanZoomHandler {
   } | null = null;
   
   private onUpdate: () => void;
+
+  /**
+   * Returns true if currently panning, zooming, or otherwise navigating the canvas.
+   * Tools should NOT trigger during navigation to avoid expensive recalculations.
+   */
+  get isInteracting(): boolean {
+    return this.isDragging || this.isWheelActive || this.touchZoomState?.active === true;
+  }
 
   constructor(
     coordSystem: CoordinateSystem,
@@ -46,6 +56,11 @@ export class PanZoomHandler {
 
   destroy(): void {
     this.detachListeners();
+    
+    if (this.wheelTimeout !== null) {
+      clearTimeout(this.wheelTimeout);
+      this.wheelTimeout = null;
+    }
     
     if (this.pointerId !== null) {
       try {
@@ -125,6 +140,17 @@ export class PanZoomHandler {
 
   private handleWheel = (e: WheelEvent): void => {
     e.preventDefault();
+    
+    // Mark wheel as active to prevent tool recalculations
+    this.isWheelActive = true;
+    if (this.wheelTimeout !== null) {
+      clearTimeout(this.wheelTimeout);
+    }
+    // Reset after a short delay when scrolling stops
+    this.wheelTimeout = window.setTimeout(() => {
+      this.isWheelActive = false;
+      this.wheelTimeout = null;
+    }, 150);
     
     // Ctrl+Wheel or trackpad pinch = zoom to cursor
     if (e.ctrlKey || Math.abs(e.deltaY) < 50) {

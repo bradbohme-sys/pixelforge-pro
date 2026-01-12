@@ -121,7 +121,8 @@ export type ToolType =
   | 'pan'
   | 'zoom'
   | 'crop'
-  | 'text';
+  | 'text'
+  | 'warp';
 
 export interface ToolContext {
   tool: ToolType;

@@ -11,6 +11,7 @@ import {
   ZoomIn,
   Crop,
   Type,
+  Spline,
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { ToolType } from '../CanvasV3/types';
@@ -32,6 +33,7 @@ const tools: ToolDefinition[] = [
   { id: 'move', icon: <Move size={18} />, label: 'Move', shortcut: 'M' },
   { id: 'magic-wand', icon: <Wand2 size={18} />, label: 'Magic Wand', shortcut: 'W' },
   { id: 'lasso', icon: <Lasso size={18} />, label: 'Lasso', shortcut: 'L' },
+  { id: 'warp', icon: <Spline size={18} />, label: 'Warp (Tessera)', shortcut: 'R' },
   { id: 'brush', icon: <Paintbrush size={18} />, label: 'Brush', shortcut: 'B' },
   { id: 'eraser', icon: <Eraser size={18} />, label: 'Eraser', shortcut: 'E' },
   { id: 'crop', icon: <Crop size={18} />, label: 'Crop', shortcut: 'C' },

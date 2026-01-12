@@ -8,7 +8,7 @@ const corsHeaders = {
 interface PinRequest {
   type: "discover" | "dye";
   imageBase64: string;
-  pins?: Array<{ x: number; y: number; id: string }>;
+  pins?: Array<{ x: number; y: number; id: string; label?: string }>;
   canvasWidth: number;
   canvasHeight: number;
 }
@@ -31,53 +31,91 @@ serve(async (req) => {
 
     if (type === "discover") {
       // Stage II: Discovery Pass (Pinning)
-      // Uses 10% threshold rule for visual prominence
-      prompt = `You are an image segmentation expert. Analyze this image and identify all distinct objects that should be selectable.
+      // Enhanced prompt with comprehensive object detection
+      prompt = `You are an expert image segmentation analyst. Analyze this image and identify ALL distinct, selectable objects.
 
 VISUAL PROMINENCE RULE (10% Threshold):
-- If an entity occupies LESS than 10% of the canvas area, treat it as a single "Semantic Parent" (e.g., "Person" not "Shirt, Face, Hair")
-- If an entity occupies MORE than 10% of the canvas area, identify its "Semantic Children" (e.g., "Shirt", "Face", "Hair", "Background")
+- Objects occupying LESS than 10% of canvas area → treat as single "Semantic Parent" (e.g., "Person" not "Shirt, Face, Hair")
+- Objects occupying MORE than 10% of canvas area → identify "Semantic Children" (e.g., for a large person: "Face", "Shirt", "Pants", "Hair")
+
+DETECTION REQUIREMENTS:
+1. Identify EVERY distinct object, including:
+   - Main subjects (people, animals, objects)
+   - Background elements (sky, ground, walls, furniture)
+   - Partial objects visible at edges
+   - Overlapping objects (identify each separately)
+   
+2. For each object provide:
+   - Unique ID (e.g., "obj_1", "obj_2")
+   - Semantic label (clear, descriptive name)
+   - Centroid coordinates (x, y) - the CENTER point of the object
+   - Estimated area percentage of canvas
+
+3. Priority order:
+   - Foreground objects first
+   - Then mid-ground
+   - Then background
+   - Edge/partial objects last
 
 Canvas size: ${canvasWidth}x${canvasHeight} pixels
 
-For each identified object, provide:
-1. A unique ID (e.g., "obj_1", "obj_2")
-2. The semantic label (what the object is)
-3. The centroid coordinates (x, y) where a pin should be placed
-4. Estimated area percentage of the canvas
-
-Return a JSON object with this structure:
+RESPONSE FORMAT (JSON only):
 {
   "pins": [
-    { "id": "obj_1", "label": "Sky", "x": 512, "y": 100, "areaPercent": 25 },
-    { "id": "obj_2", "label": "Mountain", "x": 512, "y": 300, "areaPercent": 40 }
+    { "id": "obj_1", "label": "Main Subject Face", "x": 512, "y": 200, "areaPercent": 8 },
+    { "id": "obj_2", "label": "Shirt", "x": 512, "y": 400, "areaPercent": 15 },
+    { "id": "obj_3", "label": "Background Sky", "x": 300, "y": 80, "areaPercent": 30 }
   ]
 }
 
-Only return the JSON, no other text.`;
+Be thorough - miss nothing that a user might want to select. Return ONLY the JSON object.`;
 
     } else if (type === "dye") {
       // Stage III: Dye Pass (Signal Layer Generation)
-      // Uses Nano Banana Pro for high-quality image generation
+      // Enhanced prompt with object labels for better guidance
       model = "google/gemini-3-pro-image-preview";
       
-      const pinDescriptions = pins?.map((p, i) => 
-        `Pin ${i + 1} at (${p.x}, ${p.y}) with ID "${p.id}"`
-      ).join("\n") || "No pins provided";
+      const pinDescriptions = pins?.map((p, i) => {
+        const colorNames = ['Red', 'Green', 'Blue', 'Magenta', 'Yellow', 'Cyan', 'Orange', 'Purple', 'Spring Green', 'Pink', 'Lime', 'Sky Blue'];
+        const color = colorNames[i % colorNames.length];
+        return `• "${p.label || `Object ${i + 1}`}" at (${p.x}, ${p.y}) → Fill with ${color}`;
+      }).join("\n") || "No pins provided";
 
-      prompt = `You are creating a segmentation signal layer. Using the pin locations as anchors, flood-fill the object belonging to each pin with a unique, high-contrast categorical color.
+      prompt = `You are creating a SEGMENTATION SIGNAL LAYER for precise algorithmic extraction.
 
-PIN LOCATIONS:
+TASK: Paint each identified object with a UNIQUE, SOLID, HIGH-CONTRAST color.
+
+OBJECTS TO PAINT:
 ${pinDescriptions}
 
-REQUIREMENTS:
-1. Each object should be filled with a unique, bright color (e.g., #FF0000, #00FF00, #0000FF, #FF00FF, #FFFF00, #00FFFF)
-2. Render at 75% opacity over the original texture
-3. Edges must be HARD/ALIASED - strictly adhere to object boundaries
-4. Every pin's object MUST have a distinct color from all other objects
-5. The background should remain unfilled or use a neutral gray
+CRITICAL REQUIREMENTS:
 
-This output will be used by an algorithmic system to create precise selections, so edge accuracy is critical.`;
+1. COLOR ASSIGNMENT:
+   - Use these exact colors in order: #FF0000 (Red), #00FF00 (Green), #0000FF (Blue), #FF00FF (Magenta), #FFFF00 (Yellow), #00FFFF (Cyan), #FF8000 (Orange), #8000FF (Purple)
+   - Each object MUST have a DIFFERENT color
+   - Colors must be FULLY SATURATED (100% saturation)
+
+2. FILL STYLE:
+   - Fill at 100% opacity (no transparency)
+   - Use FLAT, SOLID fills - no gradients, no textures
+   - Completely cover each object's area
+
+3. EDGE PRECISION:
+   - Edges must be HARD and ALIASED (no anti-aliasing)
+   - Follow object boundaries EXACTLY
+   - No bleeding between objects
+   - No soft edges or feathering
+
+4. COVERAGE:
+   - Fill the ENTIRE area of each object
+   - No gaps or unfilled regions within an object
+   - Background should remain as neutral gray (#808080) or original if no pin
+
+5. OUTPUT:
+   - Render at the SAME resolution as the input image
+   - This will be used for algorithmic color-matching, so precision is critical
+
+The output will be sampled by a magic wand tool at each pin location - the color must be uniform across each object for accurate selection.`;
 
     } else {
       throw new Error(`Unknown request type: ${type}`);
@@ -97,6 +135,8 @@ This output will be used by an algorithmic system to create precise selections, 
         }
       });
     }
+
+    console.log(`AI Segment: Processing ${type} request`);
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -137,13 +177,22 @@ This output will be used by an algorithmic system to create precise selections, 
       // Parse the pins from the text response
       const content = data.choices?.[0]?.message?.content || "";
       
-      // Extract JSON from the response
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      // Extract JSON from the response (handle markdown code blocks)
+      let jsonStr = content;
+      const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (codeBlockMatch) {
+        jsonStr = codeBlockMatch[1];
+      }
+      
+      const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
+        console.error("Failed to parse pins, content:", content);
         throw new Error("Failed to parse pins from AI response");
       }
       
       const pinsData = JSON.parse(jsonMatch[0]);
+      
+      console.log(`AI Segment: Discovered ${pinsData.pins?.length || 0} objects`);
       
       return new Response(
         JSON.stringify({ success: true, pins: pinsData.pins }),
@@ -151,8 +200,25 @@ This output will be used by an algorithmic system to create precise selections, 
       );
     } else {
       // Return the generated dye image
-      const generatedImage = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-      const textContent = data.choices?.[0]?.message?.content || "";
+      const message = data.choices?.[0]?.message;
+      let generatedImage = null;
+      
+      // Check for image in various response formats
+      if (message?.images?.[0]?.image_url?.url) {
+        generatedImage = message.images[0].image_url.url;
+      } else if (message?.content && Array.isArray(message.content)) {
+        // Handle array content format
+        for (const item of message.content) {
+          if (item.type === 'image_url' && item.image_url?.url) {
+            generatedImage = item.image_url.url;
+            break;
+          }
+        }
+      }
+      
+      const textContent = typeof message?.content === 'string' ? message.content : '';
+      
+      console.log(`AI Segment: Dye layer generated, has image: ${!!generatedImage}`);
       
       return new Response(
         JSON.stringify({ 

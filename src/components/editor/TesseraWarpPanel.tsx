@@ -28,17 +28,15 @@ import type {
 
 interface TesseraWarpPanelProps {
   state: TesseraWarpState;
-  onAddAnchorPin: () => void;
-  onAddPosePin: () => void;
+  onAddAnchorPin: (pos: { x: number; y: number }) => void;
+  onAddPosePin: (pos: { x: number; y: number }, angle?: number) => void;
   onRemovePin: (id: string) => void;
   onClearPins: () => void;
   onSelectPin: (id: string | null) => void;
+  onSolve: () => void;
+  onReset: () => void;
   onSolverOptionsChange: (options: Partial<ARAPSolverOptions>) => void;
-  onMaterialChange: (material: string) => void;
-  onShowMeshChange: (show: boolean) => void;
-  showMesh: boolean;
-  isAnimating: boolean;
-  onToggleAnimation: () => void;
+  onSeamOptionsChange?: (options: any) => void;
 }
 
 const MATERIAL_OPTIONS = [
@@ -55,15 +53,14 @@ export const TesseraWarpPanel: React.FC<TesseraWarpPanelProps> = ({
   onRemovePin,
   onClearPins,
   onSelectPin,
+  onSolve,
+  onReset,
   onSolverOptionsChange,
-  onMaterialChange,
-  onShowMeshChange,
-  showMesh,
-  isAnimating,
-  onToggleAnimation,
 }) => {
-  const { pins, selectedPinId, solverOptions } = state;
+  const { pins, selectedPinId, solverOptions, initialized } = state;
   const selectedPin = pins.find(p => p.id === selectedPinId);
+  const [pendingPinType, setPendingPinType] = React.useState<'anchor' | 'pose' | null>(null);
+  const [showMesh, setShowMesh] = React.useState(false);
   
   // Helper to get position from pin (handles different pin types)
   const getPinPosition = (pin: WarpPin): { x: number; y: number } | null => {
@@ -92,40 +89,59 @@ export const TesseraWarpPanel: React.FC<TesseraWarpPanelProps> = ({
       
       {/* Quick Actions */}
       <div className="space-y-2">
-        <Label className="text-xs">Add Pin</Label>
+        <Label className="text-xs">Pin Mode</Label>
         <div className="flex gap-2">
           <Button
             size="sm"
-            variant="outline"
+            variant={pendingPinType === 'anchor' ? 'default' : 'outline'}
             className="flex-1 h-8 text-xs"
-            onClick={onAddAnchorPin}
-            title="Click on canvas to place anchor pin"
+            onClick={() => setPendingPinType(pendingPinType === 'anchor' ? null : 'anchor')}
+            title="Click to enable anchor pin placement"
           >
             <Anchor className="w-3 h-3 mr-1" />
             Anchor
           </Button>
           <Button
             size="sm"
-            variant="outline"
+            variant={pendingPinType === 'pose' ? 'default' : 'outline'}
             className="flex-1 h-8 text-xs"
-            onClick={onAddPosePin}
-            title="Click on canvas to place pose pin (with rotation)"
+            onClick={() => setPendingPinType(pendingPinType === 'pose' ? null : 'pose')}
+            title="Click to enable pose pin placement"
           >
             <RotateCcw className="w-3 h-3 mr-1" />
             Pose
           </Button>
         </div>
         <p className="text-[10px] text-muted-foreground">
-          Click canvas to place pins. Drag to deform.
+          {pendingPinType 
+            ? `Click on canvas to place ${pendingPinType} pin. Drag to deform.`
+            : 'Select a pin type to begin placing pins.'}
         </p>
+        {!initialized && (
+          <p className="text-[10px] text-amber-500">
+            Import an image and select a layer to enable warping.
+          </p>
+        )}
       </div>
+      
+      {/* Solve Button */}
+      <Button
+        size="sm"
+        variant="default"
+        className="w-full h-8 text-xs"
+        onClick={onSolve}
+        disabled={pins.length < 2}
+      >
+        <Play className="w-3 h-3 mr-1" />
+        Apply Deformation
+      </Button>
       
       {/* Material Preset */}
       <div className="space-y-2">
         <Label className="text-xs">Material</Label>
         <Select 
           value={solverOptions.material} 
-          onValueChange={onMaterialChange}
+          onValueChange={(value) => onSolverOptionsChange({ material: value as any })}
         >
           <SelectTrigger className="h-8 text-xs">
             <SelectValue />
@@ -199,7 +215,7 @@ export const TesseraWarpPanel: React.FC<TesseraWarpPanelProps> = ({
           </Label>
           <Switch
             checked={showMesh}
-            onCheckedChange={onShowMeshChange}
+            onCheckedChange={setShowMesh}
           />
         </div>
         
@@ -207,19 +223,10 @@ export const TesseraWarpPanel: React.FC<TesseraWarpPanelProps> = ({
           size="sm"
           variant="outline"
           className="w-full h-8 text-xs"
-          onClick={onToggleAnimation}
+          onClick={onReset}
         >
-          {isAnimating ? (
-            <>
-              <Pause className="w-3 h-3 mr-1" />
-              Pause Preview
-            </>
-          ) : (
-            <>
-              <Play className="w-3 h-3 mr-1" />
-              Animate Preview
-            </>
-          )}
+          <RotateCcw className="w-3 h-3 mr-1" />
+          Reset Warp
         </Button>
       </div>
       

@@ -1,9 +1,11 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { CanvasV3 } from '@/components/CanvasV3/CanvasV3';
 import { LeftToolbar } from '@/components/editor/LeftToolbar';
 import { LayersPanel } from '@/components/editor/LayersPanel';
 import { ToolSettingsPanel } from '@/components/editor/ToolSettingsPanel';
 import { LassoSettingsPanel } from '@/components/editor/LassoSettingsPanel';
+import { AISegmentationPanel } from '@/components/editor/AISegmentationPanel';
+import { TesseraWarpPanel } from '@/components/editor/TesseraWarpPanel';
 import { TopBar } from '@/components/editor/TopBar';
 import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT } from '@/components/CanvasV3/constants';
 import type { ToolType, Layer, WandOptions, SelectionMask } from '@/components/CanvasV3/types';
@@ -11,10 +13,11 @@ import type { ExpansionMode } from '@/components/CanvasV3/preview';
 import { 
   DEFAULT_LASSO_SETTINGS, 
   type LassoSettings, 
-  type LassoVariant,
   type LassoMetrics 
 } from '@/components/CanvasV3/lasso';
-import { discoverObjects, type DiscoveredPin } from '@/services/aiSegmentationService';
+import { usePinAndDye } from '@/components/CanvasV3/PinAndDye/usePinAndDye';
+import { useTesseraWarp } from '@/components/CanvasV3/TesseraWarp/useTesseraWarp';
+import type { DiscoveredPin } from '@/components/CanvasV3/PinAndDye/types';
 import { toast } from 'sonner';
 
 const ImageEditor: React.FC = () => {
@@ -55,15 +58,52 @@ const ImageEditor: React.FC = () => {
   const [zoomPercent, setZoomPercent] = useState(100);
   const [currentSelection, setCurrentSelection] = useState<SelectionMask | null>(null);
   
-  // AI state
-  const [isAIProcessing, setIsAIProcessing] = useState(false);
-  const [discoveredPins, setDiscoveredPins] = useState<DiscoveredPin[]>([]);
+  // AI Segmentation state
+  const [showDyeOverlay, setShowDyeOverlay] = useState(false);
   
   // History (simplified)
   const [historyIndex, setHistoryIndex] = useState(-1);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // ============================================
+  // PIN AND DYE HOOK (AI Segmentation)
+  // ============================================
+
+  const handleSelectionExtracted = useCallback((mask: Uint8Array, pin: DiscoveredPin) => {
+    // Convert mask to SelectionMask format
+    const selectionMask: SelectionMask = {
+      data: mask,
+      width: documentWidth,
+      height: documentHeight,
+      bounds: { x: 0, y: 0, width: documentWidth, height: documentHeight },
+    };
+    setCurrentSelection(selectionMask);
+    toast.success(`Selection applied for "${pin.label}"`);
+  }, [documentWidth, documentHeight]);
+
+  const pinAndDye = usePinAndDye({
+    canvasWidth: documentWidth,
+    canvasHeight: documentHeight,
+    onSelectionExtracted: handleSelectionExtracted,
+  });
+
+  // ============================================
+  // TESSERA WARP HOOK
+  // ============================================
+
+  const tesseraWarp = useTesseraWarp();
+
+  // Initialize Tessera Warp when active layer changes
+  useEffect(() => {
+    if (activeTool === 'warp' && activeLayerId) {
+      const layer = layers.find(l => l.id === activeLayerId);
+      if (layer?.image && !tesseraWarp.state.initialized) {
+        tesseraWarp.initialize(layer.image as HTMLImageElement);
+      }
+    }
+  }, [activeTool, activeLayerId, layers, tesseraWarp]);
 
   // ============================================
   // LAYER OPERATIONS
@@ -83,11 +123,9 @@ const ImageEditor: React.FC = () => {
       
       const img = new Image();
       img.onload = () => {
-        // Use the actual image dimensions for the document
         const imgWidth = img.width;
         const imgHeight = img.height;
         
-        // If this is the first layer, set document dimensions to image size
         if (layers.length === 0) {
           setDocumentWidth(imgWidth);
           setDocumentHeight(imgHeight);
@@ -103,7 +141,6 @@ const ImageEditor: React.FC = () => {
           bounds: {
             x: 0,
             y: 0,
-            // Use actual image dimensions
             width: imgWidth,
             height: imgHeight,
           },
@@ -119,8 +156,6 @@ const ImageEditor: React.FC = () => {
       img.src = dataUrl;
     };
     reader.readAsDataURL(file);
-    
-    // Reset input
     e.target.value = '';
   }, [layers.length]);
 
@@ -130,18 +165,15 @@ const ImageEditor: React.FC = () => {
       return;
     }
     
-    // Create composite canvas using current document dimensions
     const canvas = document.createElement('canvas');
     canvas.width = documentWidth;
     canvas.height = documentHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    // Draw white background
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, documentWidth, documentHeight);
     
-    // Draw all visible layers
     for (const layer of layers) {
       if (!layer.visible || !layer.image) continue;
       
@@ -161,7 +193,6 @@ const ImageEditor: React.FC = () => {
       ctx.restore();
     }
     
-    // Download
     const link = document.createElement('a');
     link.download = 'image-export.png';
     link.href = canvas.toDataURL('image/png');
@@ -229,49 +260,48 @@ const ImageEditor: React.FC = () => {
   }, []);
 
   // ============================================
-  // AI SEGMENTATION
+  // AI SEGMENTATION HANDLERS
   // ============================================
+
+  const getCompositeImageBase64 = useCallback((): string => {
+    const canvas = document.createElement('canvas');
+    canvas.width = documentWidth;
+    canvas.height = documentHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+    
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, documentWidth, documentHeight);
+    
+    for (const layer of layers) {
+      if (!layer.visible || !layer.image) continue;
+      ctx.drawImage(layer.image, layer.bounds.x, layer.bounds.y, layer.bounds.width, layer.bounds.height);
+    }
+    
+    return canvas.toDataURL('image/png');
+  }, [layers, documentWidth, documentHeight]);
 
   const handleAIDiscover = useCallback(async () => {
     if (layers.length === 0) {
       toast.error('Import an image first');
       return;
     }
-    
-    setIsAIProcessing(true);
-    toast.info('AI analyzing image...');
-    
-    try {
-      // Create composite canvas for AI using current document dimensions
-      const canvas = document.createElement('canvas');
-      canvas.width = documentWidth;
-      canvas.height = documentHeight;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Failed to create canvas');
-      
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, documentWidth, documentHeight);
-      
-      for (const layer of layers) {
-        if (!layer.visible || !layer.image) continue;
-        ctx.drawImage(layer.image, layer.bounds.x, layer.bounds.y, layer.bounds.width, layer.bounds.height);
-      }
-      
-      const imageBase64 = canvas.toDataURL('image/png');
-      const result = await discoverObjects(imageBase64, documentWidth, documentHeight);
-      
-      if (result.success && result.pins) {
-        setDiscoveredPins(result.pins);
-        toast.success(`Found ${result.pins.length} objects`);
-      } else {
-        toast.error(result.error || 'AI discovery failed');
-      }
-    } catch (err) {
-      toast.error('AI discovery failed');
-    } finally {
-      setIsAIProcessing(false);
-    }
-  }, [layers, documentWidth, documentHeight]);
+    const imageBase64 = getCompositeImageBase64();
+    await pinAndDye.discoverPins(imageBase64);
+  }, [layers.length, getCompositeImageBase64, pinAndDye]);
+
+  const handleGenerateDye = useCallback(async () => {
+    const imageBase64 = getCompositeImageBase64();
+    await pinAndDye.generateDye(imageBase64);
+  }, [getCompositeImageBase64, pinAndDye]);
+
+  const handleExtractSelection = useCallback((pinId: string) => {
+    pinAndDye.extractSelection(pinId);
+  }, [pinAndDye]);
+
+  const handleAutoExtractAll = useCallback(() => {
+    pinAndDye.extractAllSelections();
+  }, [pinAndDye]);
 
   // ============================================
   // VIEW CONTROLS
@@ -300,6 +330,10 @@ const ImageEditor: React.FC = () => {
   const handleRedo = useCallback(() => {
     toast.info('Redo not yet implemented');
   }, []);
+
+  // Determine if AI panel should show
+  const showAIPanel = activeTool === 'magic-wand';
+  const showWarpPanel = activeTool === 'warp';
 
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
@@ -334,14 +368,30 @@ const ImageEditor: React.FC = () => {
         
         {/* Tool settings (shown for magic wand) */}
         {activeTool === 'magic-wand' && (
-          <ToolSettingsPanel
-            wandOptions={wandOptions}
-            expansionMode={expansionMode}
-            onWandOptionsChange={handleWandOptionsChange}
-            onExpansionModeChange={setExpansionMode}
-            onAIDiscover={handleAIDiscover}
-            isAIProcessing={isAIProcessing}
-          />
+          <div className="flex flex-col border-r border-border">
+            <ToolSettingsPanel
+              wandOptions={wandOptions}
+              expansionMode={expansionMode}
+              onWandOptionsChange={handleWandOptionsChange}
+              onExpansionModeChange={setExpansionMode}
+              onAIDiscover={handleAIDiscover}
+              isAIProcessing={pinAndDye.state.stage === 'discovering' || pinAndDye.state.stage === 'dyeing'}
+            />
+            {/* AI Segmentation Panel */}
+            <AISegmentationPanel
+              state={pinAndDye.state}
+              isProcessing={pinAndDye.state.stage === 'discovering' || pinAndDye.state.stage === 'dyeing'}
+              onDiscover={handleAIDiscover}
+              onGenerateDye={handleGenerateDye}
+              onExtractSelection={handleExtractSelection}
+              onAutoExtractAll={handleAutoExtractAll}
+              onSelectPin={pinAndDye.selectPin}
+              onRemovePin={pinAndDye.removePin}
+              onReset={pinAndDye.reset}
+              showDyeOverlay={showDyeOverlay}
+              onShowDyeOverlayChange={setShowDyeOverlay}
+            />
+          </div>
         )}
         
         {/* Lasso settings panel */}
@@ -355,6 +405,22 @@ const ImageEditor: React.FC = () => {
             onVariantChange={(variant) => setLassoSettings(prev => ({ ...prev, variant }))}
             onShowEdgeMapOverlayChange={setShowEdgeMapOverlay}
             onEdgeMapColorSchemeChange={setEdgeMapColorScheme}
+          />
+        )}
+        
+        {/* Tessera Warp Panel */}
+        {showWarpPanel && (
+          <TesseraWarpPanel
+            state={tesseraWarp.state}
+            onAddAnchorPin={(pos) => { tesseraWarp.addAnchorPin(pos); }}
+            onAddPosePin={(pos, angle) => { tesseraWarp.addPosePin(pos, angle); }}
+            onRemovePin={tesseraWarp.removePin}
+            onSelectPin={tesseraWarp.selectPin}
+            onClearPins={tesseraWarp.clearPins}
+            onSolve={tesseraWarp.solveDeformation}
+            onReset={tesseraWarp.reset}
+            onSolverOptionsChange={tesseraWarp.setSolverOptions}
+            onSeamOptionsChange={tesseraWarp.setSeamOptions}
           />
         )}
         
@@ -376,6 +442,21 @@ const ImageEditor: React.FC = () => {
             onLassoMetricsChange={setLassoMetrics}
             onError={handleError}
           />
+          
+          {/* Dye Overlay - shown when dye is ready and toggle is on */}
+          {showDyeOverlay && pinAndDye.dyeImage && (
+            <div 
+              className="absolute inset-0 pointer-events-none"
+              style={{ 
+                backgroundImage: `url(${pinAndDye.state.dyeLayer.base64})`,
+                backgroundSize: 'contain',
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'center',
+                opacity: 0.5,
+                mixBlendMode: 'multiply',
+              }}
+            />
+          )}
         </div>
         
         {/* Right panel - Layers */}

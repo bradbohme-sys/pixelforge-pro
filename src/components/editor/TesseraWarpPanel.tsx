@@ -17,11 +17,14 @@ import {
   Play, 
   Pause,
   Grid3X3,
-  Layers,
-  Move,
-  Circle
+  Move
 } from 'lucide-react';
-import type { TesseraWarpState, WarpPin, MaterialPreset, ARAPSolverOptions } from '@/components/CanvasV3/TesseraWarp/types';
+import type { 
+  TesseraWarpState, 
+  WarpPin, 
+  ARAPSolverOptions,
+  MATERIAL_PRESETS 
+} from '@/components/CanvasV3/TesseraWarp/types';
 
 interface TesseraWarpPanelProps {
   state: TesseraWarpState;
@@ -31,14 +34,14 @@ interface TesseraWarpPanelProps {
   onClearPins: () => void;
   onSelectPin: (id: string | null) => void;
   onSolverOptionsChange: (options: Partial<ARAPSolverOptions>) => void;
-  onMaterialPresetChange: (preset: MaterialPreset) => void;
+  onMaterialChange: (material: string) => void;
   onShowMeshChange: (show: boolean) => void;
   showMesh: boolean;
   isAnimating: boolean;
   onToggleAnimation: () => void;
 }
 
-const MATERIAL_PRESETS: { value: MaterialPreset; label: string; description: string }[] = [
+const MATERIAL_OPTIONS = [
   { value: 'rigid', label: 'Rigid', description: 'Stiff, shape-preserving' },
   { value: 'rubber', label: 'Rubber', description: 'Elastic stretching' },
   { value: 'cloth', label: 'Cloth', description: 'Soft, fabric-like' },
@@ -53,7 +56,7 @@ export const TesseraWarpPanel: React.FC<TesseraWarpPanelProps> = ({
   onClearPins,
   onSelectPin,
   onSolverOptionsChange,
-  onMaterialPresetChange,
+  onMaterialChange,
   onShowMeshChange,
   showMesh,
   isAnimating,
@@ -61,6 +64,25 @@ export const TesseraWarpPanel: React.FC<TesseraWarpPanelProps> = ({
 }) => {
   const { pins, selectedPinId, solverOptions } = state;
   const selectedPin = pins.find(p => p.id === selectedPinId);
+  
+  // Helper to get position from pin (handles different pin types)
+  const getPinPosition = (pin: WarpPin): { x: number; y: number } | null => {
+    if (pin.kind === 'anchor' || pin.kind === 'pose') {
+      return pin.pos;
+    }
+    // Rail pins have polyline, return first point
+    if (pin.kind === 'rail' && pin.poly.length > 0) {
+      return pin.poly[0];
+    }
+    return null;
+  };
+  
+  const getPinTarget = (pin: WarpPin): { x: number; y: number } | null => {
+    if (pin.kind === 'anchor' || pin.kind === 'pose') {
+      return pin.target;
+    }
+    return null;
+  };
   
   return (
     <div className="p-3 space-y-4 bg-card border-r border-border w-56 overflow-y-auto max-h-full">
@@ -102,14 +124,14 @@ export const TesseraWarpPanel: React.FC<TesseraWarpPanelProps> = ({
       <div className="space-y-2">
         <Label className="text-xs">Material</Label>
         <Select 
-          value={solverOptions.materialPreset || 'rigid'} 
-          onValueChange={(v) => onMaterialPresetChange(v as MaterialPreset)}
+          value={solverOptions.material} 
+          onValueChange={onMaterialChange}
         >
           <SelectTrigger className="h-8 text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {MATERIAL_PRESETS.map(preset => (
+            {MATERIAL_OPTIONS.map(preset => (
               <SelectItem key={preset.value} value={preset.value}>
                 <div className="flex flex-col">
                   <span>{preset.label}</span>
@@ -143,33 +165,25 @@ export const TesseraWarpPanel: React.FC<TesseraWarpPanelProps> = ({
         
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <Label className="text-xs">Stiffness</Label>
+            <Label className="text-xs">CG Iterations</Label>
             <span className="text-xs font-mono text-muted-foreground">
-              {solverOptions.stiffness.toFixed(2)}
+              {solverOptions.cgIterations}
             </span>
           </div>
           <Slider
-            value={[solverOptions.stiffness * 100]}
-            min={0}
+            value={[solverOptions.cgIterations]}
+            min={10}
             max={100}
-            step={1}
-            onValueChange={([value]) => onSolverOptionsChange({ stiffness: value / 100 })}
+            step={5}
+            onValueChange={([value]) => onSolverOptionsChange({ cgIterations: value })}
           />
         </div>
         
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label className="text-xs">Damping</Label>
-            <span className="text-xs font-mono text-muted-foreground">
-              {solverOptions.damping.toFixed(2)}
-            </span>
-          </div>
-          <Slider
-            value={[solverOptions.damping * 100]}
-            min={0}
-            max={100}
-            step={1}
-            onValueChange={([value]) => onSolverOptionsChange({ damping: value / 100 })}
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">Warm Start</Label>
+          <Switch
+            checked={solverOptions.warmStart}
+            onCheckedChange={(checked) => onSolverOptionsChange({ warmStart: checked })}
           />
         </div>
       </div>
@@ -284,20 +298,28 @@ export const TesseraWarpPanel: React.FC<TesseraWarpPanelProps> = ({
               <span className="text-muted-foreground">Type:</span>
               <span className="capitalize">{selectedPin.kind}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Position:</span>
-              <span className="font-mono">
-                {Math.round(selectedPin.pos.x)}, {Math.round(selectedPin.pos.y)}
-              </span>
-            </div>
-            {selectedPin.kind !== 'rail' && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Target:</span>
-                <span className="font-mono">
-                  {Math.round(selectedPin.target.x)}, {Math.round(selectedPin.target.y)}
-                </span>
-              </div>
-            )}
+            {(() => {
+              const pos = getPinPosition(selectedPin);
+              return pos ? (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Position:</span>
+                  <span className="font-mono">
+                    {Math.round(pos.x)}, {Math.round(pos.y)}
+                  </span>
+                </div>
+              ) : null;
+            })()}
+            {(() => {
+              const target = getPinTarget(selectedPin);
+              return target ? (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Target:</span>
+                  <span className="font-mono">
+                    {Math.round(target.x)}, {Math.round(target.y)}
+                  </span>
+                </div>
+              ) : null;
+            })()}
             {selectedPin.kind === 'pose' && (
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Angle:</span>

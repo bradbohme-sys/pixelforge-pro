@@ -274,47 +274,41 @@ export class WebGLWarpRenderer {
   
   /**
    * Upload mesh geometry
+   * RenderMesh has: positions, uvs, indices, deformed, skin
    */
   uploadMesh(mesh: RenderMesh): void {
     const gl = this.gl;
-    const vertexCount = mesh.vertexCount;
+    const vertexCount = mesh.positions.length / 2;
     
     // Build position array from deformed positions
     const positions = new Float32Array(vertexCount * 2);
     for (let i = 0; i < vertexCount; i++) {
-      positions[i * 2] = mesh.deformedPos[i * 2];
-      positions[i * 2 + 1] = mesh.deformedPos[i * 2 + 1];
-    }
-    
-    // Build tex coord array from rest positions (normalized)
-    const texCoords = new Float32Array(vertexCount * 2);
-    for (let i = 0; i < vertexCount; i++) {
-      texCoords[i * 2] = mesh.restPos[i * 2] / mesh.width;
-      texCoords[i * 2 + 1] = mesh.restPos[i * 2 + 1] / mesh.height;
+      positions[i * 2] = mesh.deformed[i * 2];
+      positions[i * 2 + 1] = mesh.deformed[i * 2 + 1];
     }
     
     // Upload positions
     gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, positions, gl.DYNAMIC_DRAW);
     
-    // Upload tex coords
+    // Upload tex coords (UVs)
     gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, texCoords, gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.uvs, gl.STATIC_DRAW);
     
     // Upload indices
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.triangles, gl.STATIC_DRAW);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.STATIC_DRAW);
     
-    this.triangleCount = mesh.triangles.length / 3;
+    this.triangleCount = mesh.indices.length / 3;
     
     // Build mesh wireframe lines for debug display
     const lineSet = new Set<string>();
     const lines: number[] = [];
     
-    for (let i = 0; i < mesh.triangles.length; i += 3) {
-      const i0 = mesh.triangles[i];
-      const i1 = mesh.triangles[i + 1];
-      const i2 = mesh.triangles[i + 2];
+    for (let i = 0; i < mesh.indices.length; i += 3) {
+      const i0 = mesh.indices[i];
+      const i1 = mesh.indices[i + 1];
+      const i2 = mesh.indices[i + 2];
       
       // Add unique edges
       const edges = [[i0, i1], [i1, i2], [i2, i0]];
@@ -331,8 +325,8 @@ export class WebGLWarpRenderer {
     const linePositions = new Float32Array(lines.length * 2);
     for (let i = 0; i < lines.length; i++) {
       const vi = lines[i];
-      linePositions[i * 2] = mesh.deformedPos[vi * 2];
-      linePositions[i * 2 + 1] = mesh.deformedPos[vi * 2 + 1];
+      linePositions[i * 2] = mesh.deformed[vi * 2];
+      linePositions[i * 2 + 1] = mesh.deformed[vi * 2 + 1];
     }
     
     gl.bindBuffer(gl.ARRAY_BUFFER, this.meshLineBuffer);
@@ -346,12 +340,13 @@ export class WebGLWarpRenderer {
    */
   updateDeformedPositions(mesh: RenderMesh): void {
     const gl = this.gl;
+    const vertexCount = mesh.positions.length / 2;
     
     // Update position buffer
-    const positions = new Float32Array(mesh.vertexCount * 2);
-    for (let i = 0; i < mesh.vertexCount; i++) {
-      positions[i * 2] = mesh.deformedPos[i * 2];
-      positions[i * 2 + 1] = mesh.deformedPos[i * 2 + 1];
+    const positions = new Float32Array(vertexCount * 2);
+    for (let i = 0; i < vertexCount; i++) {
+      positions[i * 2] = mesh.deformed[i * 2];
+      positions[i * 2 + 1] = mesh.deformed[i * 2 + 1];
     }
     
     gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
@@ -362,10 +357,10 @@ export class WebGLWarpRenderer {
       const lines: number[] = [];
       const lineSet = new Set<string>();
       
-      for (let i = 0; i < mesh.triangles.length; i += 3) {
-        const i0 = mesh.triangles[i];
-        const i1 = mesh.triangles[i + 1];
-        const i2 = mesh.triangles[i + 2];
+      for (let i = 0; i < mesh.indices.length; i += 3) {
+        const i0 = mesh.indices[i];
+        const i1 = mesh.indices[i + 1];
+        const i2 = mesh.indices[i + 2];
         
         const edges = [[i0, i1], [i1, i2], [i2, i0]];
         for (const [a, b] of edges) {
@@ -380,8 +375,8 @@ export class WebGLWarpRenderer {
       const linePositions = new Float32Array(lines.length * 2);
       for (let i = 0; i < lines.length; i++) {
         const vi = lines[i];
-        linePositions[i * 2] = mesh.deformedPos[vi * 2];
-        linePositions[i * 2 + 1] = mesh.deformedPos[vi * 2 + 1];
+        linePositions[i * 2] = mesh.deformed[vi * 2];
+        linePositions[i * 2 + 1] = mesh.deformed[vi * 2 + 1];
       }
       
       gl.bindBuffer(gl.ARRAY_BUFFER, this.meshLineBuffer);

@@ -61,6 +61,9 @@ const ImageEditor: React.FC = () => {
   // AI Segmentation state
   const [showDyeOverlay, setShowDyeOverlay] = useState(false);
   
+  // Warp mesh visualization
+  const [showWarpMesh, setShowWarpMesh] = useState(false);
+  
   // History (simplified)
   const [historyIndex, setHistoryIndex] = useState(-1);
   
@@ -412,6 +415,8 @@ const ImageEditor: React.FC = () => {
         {showWarpPanel && (
           <TesseraWarpPanel
             state={tesseraWarp.state}
+            showMesh={showWarpMesh}
+            onShowMeshChange={setShowWarpMesh}
             onAddAnchorPin={(pos) => { tesseraWarp.addAnchorPin(pos); }}
             onAddPosePin={(pos, angle) => { tesseraWarp.addPosePin(pos, angle); }}
             onRemovePin={tesseraWarp.removePin}
@@ -447,7 +452,7 @@ const ImageEditor: React.FC = () => {
             onWarpEndDrag={tesseraWarp.endDrag}
             onWarpSelectPin={tesseraWarp.selectPin}
             onWarpSolve={tesseraWarp.solveDeformation}
-            showWarpMesh={false}
+            showWarpMesh={showWarpMesh}
             // Callbacks
             onZoomChange={handleZoomChange}
             onSelectionChange={handleSelectionChange}

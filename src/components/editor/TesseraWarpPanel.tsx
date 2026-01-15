@@ -28,6 +28,8 @@ import type {
 
 interface TesseraWarpPanelProps {
   state: TesseraWarpState;
+  showMesh: boolean;
+  onShowMeshChange: (show: boolean) => void;
   onAddAnchorPin: (pos: { x: number; y: number }) => void;
   onAddPosePin: (pos: { x: number; y: number }, angle?: number) => void;
   onRemovePin: (id: string) => void;
@@ -48,6 +50,8 @@ const MATERIAL_OPTIONS = [
 
 export const TesseraWarpPanel: React.FC<TesseraWarpPanelProps> = ({
   state,
+  showMesh,
+  onShowMeshChange,
   onAddAnchorPin,
   onAddPosePin,
   onRemovePin,
@@ -60,7 +64,6 @@ export const TesseraWarpPanel: React.FC<TesseraWarpPanelProps> = ({
   const { pins, selectedPinId, solverOptions, initialized } = state;
   const selectedPin = pins.find(p => p.id === selectedPinId);
   const [pendingPinType, setPendingPinType] = React.useState<'anchor' | 'pose' | null>(null);
-  const [showMesh, setShowMesh] = React.useState(false);
   
   // Helper to get position from pin (handles different pin types)
   const getPinPosition = (pin: WarpPin): { x: number; y: number } | null => {
@@ -215,7 +218,7 @@ export const TesseraWarpPanel: React.FC<TesseraWarpPanelProps> = ({
           </Label>
           <Switch
             checked={showMesh}
-            onCheckedChange={setShowMesh}
+            onCheckedChange={onShowMeshChange}
           />
         </div>
         

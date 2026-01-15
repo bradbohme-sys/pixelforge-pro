@@ -31,6 +31,9 @@ import {
   type EdgeMap,
   DEFAULT_LASSO_SETTINGS,
 } from './lasso';
+import type { Vec2, TesseraWarpState, WarpPin, RenderMesh } from './TesseraWarp/types';
+import { v2 } from './TesseraWarp/types';
+import { WebGLWarpRenderer, type TransformMatrix } from './TesseraWarp/WebGLRenderer';
 
 // ============================================
 // HIGH-DPI INITIALIZATION
@@ -66,6 +69,16 @@ interface CanvasV3Props {
   documentHeight?: number;
   showEdgeMapOverlay?: boolean;
   edgeMapColorScheme?: 'heat' | 'grayscale' | 'direction';
+  // Tessera Warp props
+  warpState?: TesseraWarpState;
+  onWarpAddPin?: (pos: Vec2, kind: 'anchor' | 'pose') => void;
+  onWarpStartDrag?: (id: string) => void;
+  onWarpUpdateDrag?: (target: Vec2, angle?: number) => void;
+  onWarpEndDrag?: () => void;
+  onWarpSelectPin?: (id: string | null) => void;
+  onWarpSolve?: () => void;
+  showWarpMesh?: boolean;
+  // Callbacks
   onSelectionChange?: (mask: SelectionMask | null) => void;
   onZoomChange?: (zoom: number) => void;
   onToleranceChange?: (tolerance: number) => void;
@@ -87,6 +100,16 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   documentHeight = DEFAULT_CANVAS_HEIGHT,
   showEdgeMapOverlay = false,
   edgeMapColorScheme = 'heat',
+  // Tessera Warp props
+  warpState,
+  onWarpAddPin,
+  onWarpStartDrag,
+  onWarpUpdateDrag,
+  onWarpEndDrag,
+  onWarpSelectPin,
+  onWarpSolve,
+  showWarpMesh = false,
+  // Callbacks
   onSelectionChange,
   onZoomChange,
   onToleranceChange,
@@ -95,6 +118,7 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
 }) => {
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
   const interactionCanvasRef = useRef<HTMLCanvasElement>(null);
+  const warpCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
   const coordSystemRef = useRef<CoordinateSystem | null>(null);
@@ -103,6 +127,12 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   const magicWandHandlerRef = useRef<V3MagicWandHandler | null>(null);
   const lassoHandlerRef = useRef<BaseLassoHandler | null>(null);
   const interactionRafIdRef = useRef<number | null>(null);
+  
+  // Tessera Warp refs
+  const warpRendererRef = useRef<WebGLWarpRenderer | null>(null);
+  const warpRafIdRef = useRef<number | null>(null);
+  const warpStateRef = useRef<TesseraWarpState | undefined>(warpState);
+  warpStateRef.current = warpState;
   
   const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
   
@@ -371,6 +401,15 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
           lassoHandler.draw(ctx);
           ctx.restore();
         }
+        
+        // Draw warp pins
+        const warpData = warpStateRef.current;
+        if (currentTool === 'warp' && warpData?.initialized && warpData.pins.length > 0) {
+          ctx.save();
+          coordSystemRef.current.applyTransform(ctx);
+          drawWarpPins(ctx, warpData.pins, warpData.selectedPinId, warpData.draggingPinId);
+          ctx.restore();
+        }
       }
       interactionRafIdRef.current = requestAnimationFrame(interactionLoop);
     };
@@ -470,6 +509,113 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   }, [documentWidth, documentHeight]);
 
   // ============================================
+  // TESSERA WARP WEBGL RENDERER
+  // ============================================
+
+  // Initialize WebGL warp renderer when warp tool is active and initialized
+  useEffect(() => {
+    const warpCanvas = warpCanvasRef.current;
+    if (!warpCanvas || activeTool !== 'warp' || !warpState?.initialized) {
+      // Destroy renderer if tool changes
+      if (warpRendererRef.current) {
+        warpRendererRef.current.destroy();
+        warpRendererRef.current = null;
+      }
+      if (warpRafIdRef.current !== null) {
+        cancelAnimationFrame(warpRafIdRef.current);
+        warpRafIdRef.current = null;
+      }
+      return;
+    }
+
+    // Initialize canvas for high-DPI
+    initializeHighDPICanvas(warpCanvas);
+
+    try {
+      // Create WebGL renderer
+      const renderer = new WebGLWarpRenderer(warpCanvas, {
+        showMesh: showWarpMesh,
+        meshColor: [0.3, 0.6, 1.0],
+        meshOpacity: 0.5,
+        opacity: 1.0,
+      });
+      warpRendererRef.current = renderer;
+
+      // Upload texture from source image
+      if (warpState.sourceImage) {
+        renderer.uploadTexture(warpState.sourceImage);
+      }
+
+      // Upload mesh
+      if (warpState.mesh) {
+        renderer.uploadMesh(warpState.mesh);
+      }
+
+      // Start render loop
+      const renderLoop = () => {
+        if (!coordSystemRef.current || !warpRendererRef.current) {
+          warpRafIdRef.current = requestAnimationFrame(renderLoop);
+          return;
+        }
+
+        const state = warpStateRef.current;
+        if (state?.mesh) {
+          // Update deformed positions if they changed
+          warpRendererRef.current.updateDeformedPositions(state.mesh);
+
+          // Get transform from coordinate system
+          const zoom = coordSystemRef.current.zoom;
+          const panX = coordSystemRef.current.panX;
+          const panY = coordSystemRef.current.panY;
+
+          const transform: TransformMatrix = {
+            a: zoom,
+            b: 0,
+            c: 0,
+            d: zoom,
+            e: panX,
+            f: panY,
+          };
+
+          warpRendererRef.current.render(transform);
+        }
+
+        warpRafIdRef.current = requestAnimationFrame(renderLoop);
+      };
+      warpRafIdRef.current = requestAnimationFrame(renderLoop);
+
+    } catch (err) {
+      console.error('[CanvasV3] Failed to initialize WebGL warp renderer:', err);
+      setError('WebGL2 not supported for warp tool');
+    }
+
+    return () => {
+      if (warpRendererRef.current) {
+        warpRendererRef.current.destroy();
+        warpRendererRef.current = null;
+      }
+      if (warpRafIdRef.current !== null) {
+        cancelAnimationFrame(warpRafIdRef.current);
+        warpRafIdRef.current = null;
+      }
+    };
+  }, [activeTool, warpState?.initialized, warpState?.sourceImage, showWarpMesh]);
+
+  // Update mesh when warp state changes
+  useEffect(() => {
+    if (warpRendererRef.current && warpState?.mesh) {
+      warpRendererRef.current.uploadMesh(warpState.mesh);
+    }
+  }, [warpState?.mesh]);
+
+  // Update mesh options when showWarpMesh changes
+  useEffect(() => {
+    if (warpRendererRef.current) {
+      warpRendererRef.current.setOptions({ showMesh: showWarpMesh });
+    }
+  }, [showWarpMesh]);
+
+  // ============================================
   // HANDLERS
   // ============================================
 
@@ -503,7 +649,14 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     if (activeTool === 'lasso' && lassoHandlerRef.current) {
       lassoHandlerRef.current.handleMove(e.clientX, e.clientY);
     }
-  }, [activeTool]);
+    
+    // Handle warp drag
+    if (activeTool === 'warp' && warpState?.draggingPinId && onWarpUpdateDrag) {
+      onWarpUpdateDrag({ x: worldPoint.x, y: worldPoint.y });
+      // Solve deformation in real-time during drag
+      onWarpSolve?.();
+    }
+  }, [activeTool, warpState?.draggingPinId, onWarpUpdateDrag, onWarpSolve]);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     if (!coordSystemRef.current) return;
@@ -525,7 +678,55 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     if (activeTool === 'lasso' && lassoHandlerRef.current) {
       lassoHandlerRef.current.handleClick(e.clientX, e.clientY);
     }
-  }, [activeTool]);
+    
+    // Handle warp pin placement/selection
+    if (activeTool === 'warp' && warpState?.initialized) {
+      const worldPoint = coordSystemRef.current.screenToWorld(e.clientX, e.clientY);
+      const pos: Vec2 = { x: worldPoint.x, y: worldPoint.y };
+      
+      // Check if clicking on existing pin
+      const clickedPin = findPinAtPoint(warpState.pins, pos, 15);
+      
+      if (clickedPin) {
+        // Select the pin
+        onWarpSelectPin?.(clickedPin.id);
+      } else {
+        // Add new pin - Shift = pose pin, normal = anchor pin
+        const pinKind = e.shiftKey ? 'pose' : 'anchor';
+        onWarpAddPin?.(pos, pinKind);
+      }
+    }
+  }, [activeTool, warpState?.initialized, warpState?.pins, onWarpSelectPin, onWarpAddPin]);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    if (!coordSystemRef.current) return;
+    
+    // Skip during pan/zoom
+    if (panZoomHandlerRef.current?.isInteracting) return;
+    
+    // Handle warp pin drag start
+    if (activeTool === 'warp' && warpState?.initialized) {
+      const worldPoint = coordSystemRef.current.screenToWorld(e.clientX, e.clientY);
+      const pos: Vec2 = { x: worldPoint.x, y: worldPoint.y };
+      
+      // Check if starting drag on existing pin
+      const clickedPin = findPinAtPoint(warpState.pins, pos, 15);
+      
+      if (clickedPin) {
+        onWarpStartDrag?.(clickedPin.id);
+        e.preventDefault();
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      }
+    }
+  }, [activeTool, warpState?.initialized, warpState?.pins, onWarpStartDrag]);
+
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    // End warp drag
+    if (activeTool === 'warp' && warpState?.draggingPinId) {
+      onWarpEndDrag?.();
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    }
+  }, [activeTool, warpState?.draggingPinId, onWarpEndDrag]);
 
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
     if (!coordSystemRef.current) return;
@@ -580,12 +781,23 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
         style={{ zIndex: 0 }}
       />
       
-      {/* Interaction canvas (overlays, selections) */}
+      {/* Warp canvas (WebGL deformation) */}
+      {activeTool === 'warp' && warpState?.initialized && (
+        <canvas
+          ref={warpCanvasRef}
+          className="absolute inset-0 w-full h-full"
+          style={{ zIndex: 1 }}
+        />
+      )}
+      
+      {/* Interaction canvas (overlays, selections, warp pins) */}
       <canvas
         ref={interactionCanvasRef}
         className="absolute inset-0 w-full h-full"
-        style={{ zIndex: 1, pointerEvents: 'auto' }}
+        style={{ zIndex: 2, pointerEvents: 'auto' }}
         onPointerMove={handlePointerMove}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerLeave}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
@@ -605,12 +817,25 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
             <span className="text-primary">Tol: {currentTolerance}</span>
           </>
         )}
+        {activeTool === 'warp' && warpState?.initialized && (
+          <>
+            <span className="text-border">|</span>
+            <span className="text-primary">Pins: {warpState.pins.length}</span>
+          </>
+        )}
       </div>
       
       {/* Scroll hint for magic wand */}
       {activeTool === 'magic-wand' && hoverPreview && (
         <div className="absolute bottom-12 right-3 px-2 py-1 bg-card/80 backdrop-blur-sm border border-border rounded text-xs text-muted-foreground animate-fade-in">
           Scroll to adjust tolerance
+        </div>
+      )}
+      
+      {/* Warp tool hint */}
+      {activeTool === 'warp' && warpState?.initialized && warpState.pins.length === 0 && (
+        <div className="absolute bottom-12 right-3 px-2 py-1 bg-card/80 backdrop-blur-sm border border-border rounded text-xs text-muted-foreground animate-fade-in">
+          Click to add anchor pin, Shift+click for pose pin
         </div>
       )}
       
@@ -778,6 +1003,115 @@ function drawEdgeMapOverlay(
   ctx.globalCompositeOperation = 'screen';
   ctx.drawImage(offscreen, 0, 0);
   ctx.restore();
+}
+
+/**
+ * Find a warp pin at a given point
+ */
+function findPinAtPoint(pins: WarpPin[], point: Vec2, tolerance: number = 15): WarpPin | null {
+  for (let i = pins.length - 1; i >= 0; i--) {
+    const pin = pins[i];
+    
+    if (pin.kind === 'anchor' || pin.kind === 'pose') {
+      const dist = v2.dist(point, pin.target);
+      if (dist <= tolerance) {
+        return pin;
+      }
+    } else if (pin.kind === 'rail') {
+      // Check distance to polyline segments
+      for (let j = 0; j < pin.poly.length - 1; j++) {
+        const p0 = pin.poly[j];
+        const p1 = pin.poly[j + 1];
+        const dist = pointToSegmentDistance(point, p0, p1);
+        if (dist <= tolerance) {
+          return pin;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Calculate distance from point to line segment
+ */
+function pointToSegmentDistance(p: Vec2, a: Vec2, b: Vec2): number {
+  const ab = v2.sub(b, a);
+  const ap = v2.sub(p, a);
+  const lenSq = v2.lenSq(ab);
+  
+  if (lenSq < 1e-10) {
+    return v2.len(ap);
+  }
+  
+  const t = Math.max(0, Math.min(1, v2.dot(ap, ab) / lenSq));
+  const proj = v2.add(a, v2.mul(ab, t));
+  return v2.dist(p, proj);
+}
+
+/**
+ * Draw warp pins on context
+ */
+function drawWarpPins(
+  ctx: CanvasRenderingContext2D,
+  pins: WarpPin[],
+  selectedId: string | null,
+  draggingId: string | null
+): void {
+  for (const pin of pins) {
+    const isSelected = pin.id === selectedId;
+    const isDragging = pin.id === draggingId;
+    
+    if (pin.kind === 'anchor' || pin.kind === 'pose') {
+      const { target } = pin;
+      
+      // Draw influence radius
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, pin.radius, 0, Math.PI * 2);
+      ctx.fillStyle = isSelected ? 'rgba(59, 130, 246, 0.1)' : 'rgba(100, 100, 100, 0.05)';
+      ctx.fill();
+      ctx.strokeStyle = isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(100, 100, 100, 0.2)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      
+      // Draw pin
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, isDragging ? 10 : 8, 0, Math.PI * 2);
+      ctx.fillStyle = pin.kind === 'anchor' 
+        ? (isSelected ? '#3b82f6' : '#60a5fa')
+        : (isSelected ? '#f59e0b' : '#fbbf24');
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      
+      // Draw angle indicator for pose pins
+      if (pin.kind === 'pose') {
+        const angle = pin.angle || 0;
+        const len = 20;
+        ctx.beginPath();
+        ctx.moveTo(target.x, target.y);
+        ctx.lineTo(
+          target.x + Math.cos(angle) * len,
+          target.y + Math.sin(angle) * len
+        );
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+    } else if (pin.kind === 'rail') {
+      // Draw rail polyline
+      ctx.beginPath();
+      for (let i = 0; i < pin.poly.length; i++) {
+        const pt = pin.poly[i];
+        if (i === 0) ctx.moveTo(pt.x, pt.y);
+        else ctx.lineTo(pt.x, pt.y);
+      }
+      ctx.strokeStyle = isSelected ? '#a855f7' : '#c084fc';
+      ctx.lineWidth = isSelected ? 4 : 3;
+      ctx.stroke();
+    }
+  }
 }
 
 export default CanvasV3;

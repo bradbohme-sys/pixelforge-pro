@@ -436,6 +436,19 @@ const ImageEditor: React.FC = () => {
             documentHeight={documentHeight}
             showEdgeMapOverlay={showEdgeMapOverlay && activeTool === 'lasso'}
             edgeMapColorScheme={edgeMapColorScheme}
+            // Tessera Warp integration
+            warpState={tesseraWarp.state}
+            onWarpAddPin={(pos, kind) => {
+              if (kind === 'anchor') tesseraWarp.addAnchorPin(pos);
+              else tesseraWarp.addPosePin(pos);
+            }}
+            onWarpStartDrag={tesseraWarp.startDrag}
+            onWarpUpdateDrag={tesseraWarp.updateDrag}
+            onWarpEndDrag={tesseraWarp.endDrag}
+            onWarpSelectPin={tesseraWarp.selectPin}
+            onWarpSolve={tesseraWarp.solveDeformation}
+            showWarpMesh={false}
+            // Callbacks
             onZoomChange={handleZoomChange}
             onSelectionChange={handleSelectionChange}
             onToleranceChange={(tol) => setWandOptions(prev => ({ ...prev, tolerance: tol }))}

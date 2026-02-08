@@ -451,6 +451,7 @@ const ImageEditor: React.FC = () => {
             onWarpUpdateDrag={tesseraWarp.updateDrag}
             onWarpEndDrag={tesseraWarp.endDrag}
             onWarpSelectPin={tesseraWarp.selectPin}
+            onWarpRemovePin={tesseraWarp.removePin}
             onWarpSolve={tesseraWarp.solveDeformation}
             showWarpMesh={showWarpMesh}
             // Callbacks

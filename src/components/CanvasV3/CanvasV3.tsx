@@ -76,6 +76,7 @@ interface CanvasV3Props {
   onWarpUpdateDrag?: (target: Vec2, angle?: number) => void;
   onWarpEndDrag?: () => void;
   onWarpSelectPin?: (id: string | null) => void;
+  onWarpRemovePin?: (id: string) => void;
   onWarpSolve?: () => void;
   showWarpMesh?: boolean;
   // Callbacks
@@ -107,6 +108,7 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   onWarpUpdateDrag,
   onWarpEndDrag,
   onWarpSelectPin,
+  onWarpRemovePin,
   onWarpSolve,
   showWarpMesh = false,
   // Callbacks
@@ -339,6 +341,40 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   }, [activeTool]);
 
   // ============================================
+  // KEYBOARD SHORTCUTS FOR WARP
+  // ============================================
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if in input field
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      
+      if (activeTool !== 'warp' || !warpState?.initialized) return;
+      
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Delete selected pin
+        if (warpState.selectedPinId && onWarpRemovePin) {
+          e.preventDefault();
+          onWarpRemovePin(warpState.selectedPinId);
+        }
+      } else if (e.key === 'Escape') {
+        // Cancel dragging or deselect pin
+        e.preventDefault();
+        if (warpState.draggingPinId) {
+          onWarpEndDrag?.();
+        } else {
+          onWarpSelectPin?.(null);
+        }
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTool, warpState?.initialized, warpState?.selectedPinId, warpState?.draggingPinId, onWarpRemovePin, onWarpEndDrag, onWarpSelectPin]);
+
+  // ============================================
   // INITIALIZATION
   // ============================================
 
@@ -515,7 +551,8 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
   // Initialize WebGL warp renderer when warp tool is active and initialized
   useEffect(() => {
     const warpCanvas = warpCanvasRef.current;
-    if (!warpCanvas || activeTool !== 'warp' || !warpState?.initialized) {
+    const mainCanvas = mainCanvasRef.current;
+    if (!warpCanvas || !mainCanvas || activeTool !== 'warp' || !warpState?.initialized) {
       // Destroy renderer if tool changes
       if (warpRendererRef.current) {
         warpRendererRef.current.destroy();
@@ -563,18 +600,28 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
           // Update deformed positions if they changed
           warpRendererRef.current.updateDeformedPositions(state.mesh);
 
-          // Get transform from coordinate system
+          // Get transform from coordinate system - must match main canvas centering
           const zoom = coordSystemRef.current.zoom;
           const panX = coordSystemRef.current.panX;
           const panY = coordSystemRef.current.panY;
+          const dpr = coordSystemRef.current.dpr;
+          
+          // Calculate centering offset (same as CoordinateSystem.getImageOffset)
+          const rect = warpCanvas.getBoundingClientRect();
+          const docW = coordSystemRef.current.documentWidth;
+          const docH = coordSystemRef.current.documentHeight;
+          const offsetX = (rect.width - docW * zoom) / 2;
+          const offsetY = (rect.height - docH * zoom) / 2;
 
+          // Transform: DPR scale, then offset + pan, then zoom
+          // WebGL expects the combined transform
           const transform: TransformMatrix = {
-            a: zoom,
+            a: zoom * dpr,
             b: 0,
             c: 0,
-            d: zoom,
-            e: panX,
-            f: panY,
+            d: zoom * dpr,
+            e: (offsetX + panX) * dpr,
+            f: (offsetY + panY) * dpr,
           };
 
           warpRendererRef.current.render(transform);
@@ -599,7 +646,7 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
         warpRafIdRef.current = null;
       }
     };
-  }, [activeTool, warpState?.initialized, warpState?.sourceImage, showWarpMesh]);
+  }, [activeTool, warpState?.initialized, warpState?.sourceImage, showWarpMesh, documentWidth, documentHeight]);
 
   // Update mesh when warp state changes
   useEffect(() => {
@@ -615,9 +662,13 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     }
   }, [showWarpMesh]);
 
-  // ============================================
-  // HANDLERS
-  // ============================================
+  // Hide main canvas layers when warp is active to prevent double rendering
+  useEffect(() => {
+    if (renderPipelineRef.current) {
+      const shouldHide = activeTool === 'warp' && warpState?.initialized === true;
+      renderPipelineRef.current.setHideLayerContent(shouldHide);
+    }
+  }, [activeTool, warpState?.initialized]);
 
   const handlePanZoomUpdate = useCallback(() => {
     if (!coordSystemRef.current) return;
@@ -684,8 +735,12 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
       const worldPoint = coordSystemRef.current.screenToWorld(e.clientX, e.clientY);
       const pos: Vec2 = { x: worldPoint.x, y: worldPoint.y };
       
-      // Check if clicking on existing pin
-      const clickedPin = findPinAtPoint(warpState.pins, pos, 15);
+      // Adjust tolerance based on zoom (larger tolerance when zoomed out)
+      const zoom = coordSystemRef.current.zoom;
+      const adjustedTolerance = 15 / zoom;
+      
+      // Check if clicking on existing pin (check target position)
+      const clickedPin = findPinAtPoint(warpState.pins, pos, adjustedTolerance);
       
       if (clickedPin) {
         // Select the pin
@@ -709,8 +764,12 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
       const worldPoint = coordSystemRef.current.screenToWorld(e.clientX, e.clientY);
       const pos: Vec2 = { x: worldPoint.x, y: worldPoint.y };
       
+      // Adjust tolerance based on zoom
+      const zoom = coordSystemRef.current.zoom;
+      const adjustedTolerance = 15 / zoom;
+      
       // Check if starting drag on existing pin
-      const clickedPin = findPinAtPoint(warpState.pins, pos, 15);
+      const clickedPin = findPinAtPoint(warpState.pins, pos, adjustedTolerance);
       
       if (clickedPin) {
         onWarpStartDrag?.(clickedPin.id);
@@ -832,10 +891,15 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
         </div>
       )}
       
-      {/* Warp tool hint */}
+      {/* Warp tool hints */}
       {activeTool === 'warp' && warpState?.initialized && warpState.pins.length === 0 && (
         <div className="absolute bottom-12 right-3 px-2 py-1 bg-card/80 backdrop-blur-sm border border-border rounded text-xs text-muted-foreground animate-fade-in">
           Click to add anchor pin, Shift+click for pose pin
+        </div>
+      )}
+      {activeTool === 'warp' && warpState?.initialized && warpState.pins.length > 0 && warpState.selectedPinId && (
+        <div className="absolute bottom-12 right-3 px-2 py-1 bg-card/80 backdrop-blur-sm border border-border rounded text-xs text-muted-foreground animate-fade-in">
+          Drag to deform • Delete/Backspace to remove pin
         </div>
       )}
       
@@ -1050,7 +1114,8 @@ function pointToSegmentDistance(p: Vec2, a: Vec2, b: Vec2): number {
 }
 
 /**
- * Draw warp pins on context
+ * Draw warp pins on context with intuitive visual feedback
+ * Shows: rest position (ghost), target position (solid), connection line, influence radius
  */
 function drawWarpPins(
   ctx: CanvasRenderingContext2D,
@@ -1058,37 +1123,77 @@ function drawWarpPins(
   selectedId: string | null,
   draggingId: string | null
 ): void {
+  // Get current transform scale to adjust pin sizes
+  const transform = ctx.getTransform();
+  const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
+  const invScale = 1 / scale;
+  
   for (const pin of pins) {
     const isSelected = pin.id === selectedId;
     const isDragging = pin.id === draggingId;
     
     if (pin.kind === 'anchor' || pin.kind === 'pose') {
-      const { target } = pin;
+      const { pos, target } = pin;
+      const hasMoved = Math.abs(pos.x - target.x) > 0.5 || Math.abs(pos.y - target.y) > 0.5;
       
-      // Draw influence radius
+      // Draw influence radius at TARGET position (scaled for visibility)
       ctx.beginPath();
       ctx.arc(target.x, target.y, pin.radius, 0, Math.PI * 2);
-      ctx.fillStyle = isSelected ? 'rgba(59, 130, 246, 0.1)' : 'rgba(100, 100, 100, 0.05)';
+      ctx.fillStyle = isSelected ? 'rgba(59, 130, 246, 0.08)' : 'rgba(100, 100, 100, 0.03)';
       ctx.fill();
-      ctx.strokeStyle = isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(100, 100, 100, 0.2)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = isSelected ? 'rgba(59, 130, 246, 0.4)' : 'rgba(100, 100, 100, 0.2)';
+      ctx.lineWidth = 1 * invScale;
+      ctx.setLineDash([4 * invScale, 4 * invScale]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      
+      // Draw connection line from rest to target if moved
+      if (hasMoved) {
+        ctx.beginPath();
+        ctx.moveTo(pos.x, pos.y);
+        ctx.lineTo(target.x, target.y);
+        ctx.strokeStyle = isSelected ? 'rgba(59, 130, 246, 0.6)' : 'rgba(150, 150, 150, 0.5)';
+        ctx.lineWidth = 2 * invScale;
+        ctx.stroke();
+        
+        // Draw rest position (ghost pin)
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, 6 * invScale, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(150, 150, 150, 0.3)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.lineWidth = 1.5 * invScale;
+        ctx.stroke();
+      }
+      
+      // Draw target pin (main handle)
+      const pinRadius = (isDragging ? 12 : isSelected ? 10 : 8) * invScale;
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, pinRadius, 0, Math.PI * 2);
+      
+      // Color based on pin type
+      if (pin.kind === 'anchor') {
+        ctx.fillStyle = isSelected ? '#3b82f6' : '#60a5fa';
+      } else {
+        ctx.fillStyle = isSelected ? '#f59e0b' : '#fbbf24';
+      }
+      ctx.fill();
+      
+      // White border
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2.5 * invScale;
       ctx.stroke();
       
-      // Draw pin
+      // Inner highlight
       ctx.beginPath();
-      ctx.arc(target.x, target.y, isDragging ? 10 : 8, 0, Math.PI * 2);
-      ctx.fillStyle = pin.kind === 'anchor' 
-        ? (isSelected ? '#3b82f6' : '#60a5fa')
-        : (isSelected ? '#f59e0b' : '#fbbf24');
+      ctx.arc(target.x - 2 * invScale, target.y - 2 * invScale, 3 * invScale, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
       ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.stroke();
       
       // Draw angle indicator for pose pins
       if (pin.kind === 'pose') {
         const angle = pin.angle || 0;
-        const len = 20;
+        const len = 25 * invScale;
         ctx.beginPath();
         ctx.moveTo(target.x, target.y);
         ctx.lineTo(
@@ -1096,8 +1201,27 @@ function drawWarpPins(
           target.y + Math.sin(angle) * len
         );
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 3 * invScale;
+        ctx.lineCap = 'round';
         ctx.stroke();
+        
+        // Arrow head
+        const arrowSize = 8 * invScale;
+        const arrowX = target.x + Math.cos(angle) * len;
+        const arrowY = target.y + Math.sin(angle) * len;
+        ctx.beginPath();
+        ctx.moveTo(arrowX, arrowY);
+        ctx.lineTo(
+          arrowX - Math.cos(angle - 0.4) * arrowSize,
+          arrowY - Math.sin(angle - 0.4) * arrowSize
+        );
+        ctx.moveTo(arrowX, arrowY);
+        ctx.lineTo(
+          arrowX - Math.cos(angle + 0.4) * arrowSize,
+          arrowY - Math.sin(angle + 0.4) * arrowSize
+        );
+        ctx.stroke();
+        ctx.lineCap = 'butt';
       }
     } else if (pin.kind === 'rail') {
       // Draw rail polyline
@@ -1108,7 +1232,7 @@ function drawWarpPins(
         else ctx.lineTo(pt.x, pt.y);
       }
       ctx.strokeStyle = isSelected ? '#a855f7' : '#c084fc';
-      ctx.lineWidth = isSelected ? 4 : 3;
+      ctx.lineWidth = (isSelected ? 4 : 3) * invScale;
       ctx.stroke();
     }
   }

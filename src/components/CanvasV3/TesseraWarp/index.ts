@@ -55,6 +55,11 @@ export {
 } from './RenderMesh';
 export type { RenderMeshOptions } from './RenderMesh';
 
-// React hook
+// Basic React hook (simple pin system)
 export { useTesseraWarp } from './useTesseraWarp';
 export type { UseTesseraWarpReturn } from './useTesseraWarp';
+
+// Advanced Pin System (cage pins, control pins, bones, connections, 3D depth)
+export * from './AdvancedPinTypes';
+export { useAdvancedWarp } from './useAdvancedWarp';
+export type { UseAdvancedWarpReturn } from './useAdvancedWarp';

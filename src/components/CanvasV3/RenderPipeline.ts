@@ -34,6 +34,9 @@ export class RenderPipeline {
   private docWidth: number;
   private docHeight: number;
   
+  // Hide layers when external renderer (e.g., warp) takes over
+  private hideLayerContent: boolean = false;
+  
   private onRenderInteraction: ((ctx: CanvasRenderingContext2D, deltaTime: number) => void) | null = null;
 
   constructor(width: number, height: number) {
@@ -101,6 +104,16 @@ export class RenderPipeline {
     this.layerCacheDirty = true;
   }
 
+  /**
+   * Hide layer content (used when external renderer like warp takes over)
+   */
+  setHideLayerContent(hide: boolean): void {
+    if (this.hideLayerContent !== hide) {
+      this.hideLayerContent = hide;
+      this.layerCacheDirty = true;
+    }
+  }
+
   setInteractionRenderer(
     callback: (ctx: CanvasRenderingContext2D, deltaTime: number) => void
   ): void {
@@ -155,6 +168,9 @@ export class RenderPipeline {
     ctx.strokeStyle = '#454549';
     ctx.lineWidth = 1;
     ctx.strokeRect(0, 0, this.docWidth, this.docHeight);
+    
+    // Skip rendering layers if hidden (e.g., warp tool is active)
+    if (this.hideLayerContent) return;
     
     // Render each visible layer
     for (const layer of state.layers) {

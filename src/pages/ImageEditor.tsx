@@ -5,7 +5,7 @@ import { LayersPanel } from '@/components/editor/LayersPanel';
 import { ToolSettingsPanel } from '@/components/editor/ToolSettingsPanel';
 import { LassoSettingsPanel } from '@/components/editor/LassoSettingsPanel';
 import { AISegmentationPanel } from '@/components/editor/AISegmentationPanel';
-import { TesseraWarpPanel } from '@/components/editor/TesseraWarpPanel';
+import { AdvancedWarpPanel } from '@/components/editor/AdvancedWarpPanel';
 import { TopBar } from '@/components/editor/TopBar';
 import { DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT } from '@/components/CanvasV3/constants';
 import type { ToolType, Layer, WandOptions, SelectionMask } from '@/components/CanvasV3/types';
@@ -16,7 +16,7 @@ import {
   type LassoMetrics 
 } from '@/components/CanvasV3/lasso';
 import { usePinAndDye } from '@/components/CanvasV3/PinAndDye/usePinAndDye';
-import { useTesseraWarp } from '@/components/CanvasV3/TesseraWarp/useTesseraWarp';
+import { useAdvancedWarp } from '@/components/CanvasV3/TesseraWarp/useAdvancedWarp';
 import type { DiscoveredPin } from '@/components/CanvasV3/PinAndDye/types';
 import { toast } from 'sonner';
 
@@ -61,9 +61,6 @@ const ImageEditor: React.FC = () => {
   // AI Segmentation state
   const [showDyeOverlay, setShowDyeOverlay] = useState(false);
   
-  // Warp mesh visualization
-  const [showWarpMesh, setShowWarpMesh] = useState(false);
-  
   // History (simplified)
   const [historyIndex, setHistoryIndex] = useState(-1);
   
@@ -75,7 +72,6 @@ const ImageEditor: React.FC = () => {
   // ============================================
 
   const handleSelectionExtracted = useCallback((mask: Uint8Array, pin: DiscoveredPin) => {
-    // Convert mask to SelectionMask format
     const selectionMask: SelectionMask = {
       data: mask,
       width: documentWidth,
@@ -93,20 +89,10 @@ const ImageEditor: React.FC = () => {
   });
 
   // ============================================
-  // TESSERA WARP HOOK
+  // ADVANCED WARP HOOK
   // ============================================
 
-  const tesseraWarp = useTesseraWarp();
-
-  // Initialize Tessera Warp when active layer changes
-  useEffect(() => {
-    if (activeTool === 'warp' && activeLayerId) {
-      const layer = layers.find(l => l.id === activeLayerId);
-      if (layer?.image && !tesseraWarp.state.initialized) {
-        tesseraWarp.initialize(layer.image as HTMLImageElement);
-      }
-    }
-  }, [activeTool, activeLayerId, layers, tesseraWarp]);
+  const advancedWarp = useAdvancedWarp();
 
   // ============================================
   // LAYER OPERATIONS
@@ -335,7 +321,6 @@ const ImageEditor: React.FC = () => {
   }, []);
 
   // Determine if AI panel should show
-  const showAIPanel = activeTool === 'magic-wand';
   const showWarpPanel = activeTool === 'warp';
 
   return (
@@ -411,21 +396,31 @@ const ImageEditor: React.FC = () => {
           />
         )}
         
-        {/* Tessera Warp Panel */}
+        {/* Advanced Warp Panel */}
         {showWarpPanel && (
-          <TesseraWarpPanel
-            state={tesseraWarp.state}
-            showMesh={showWarpMesh}
-            onShowMeshChange={setShowWarpMesh}
-            onAddAnchorPin={(pos) => { tesseraWarp.addAnchorPin(pos); }}
-            onAddPosePin={(pos, angle) => { tesseraWarp.addPosePin(pos, angle); }}
-            onRemovePin={tesseraWarp.removePin}
-            onSelectPin={tesseraWarp.selectPin}
-            onClearPins={tesseraWarp.clearPins}
-            onSolve={tesseraWarp.solveDeformation}
-            onReset={tesseraWarp.reset}
-            onSolverOptionsChange={tesseraWarp.setSolverOptions}
-            onSeamOptionsChange={tesseraWarp.setSeamOptions}
+          <AdvancedWarpPanel
+            state={advancedWarp.state}
+            onToolModeChange={advancedWarp.setToolMode}
+            onPinSelect={advancedWarp.selectPin}
+            onPinDelete={advancedWarp.deletePin}
+            onDeleteSelected={advancedWarp.deleteSelectedPins}
+            onClearAll={advancedWarp.clearAllPins}
+            onUpdatePinRadius={advancedWarp.updatePinRadius}
+            onUpdatePinStrength={advancedWarp.updatePinStrength}
+            onUpdatePinAngle={advancedWarp.updatePinAngle}
+            onUpdatePinScale={advancedWarp.updatePinScale}
+            onUpdatePinDepth={advancedWarp.updatePinDepth}
+            onUpdatePinFalloff={advancedWarp.updatePinFalloff}
+            onLockPin={advancedWarp.lockPin}
+            onAutoConnect={advancedWarp.autoConnectCagePins}
+            onUpdateConnectionStrength={advancedWarp.updateConnectionStrength}
+            onUpdateConnectionType={advancedWarp.updateConnectionType}
+            onRemoveConnection={advancedWarp.removeConnection}
+            onDepthSettingsChange={advancedWarp.setDepthSettings}
+            onSymmetryChange={advancedWarp.setSymmetryMode}
+            onToggleConnections={advancedWarp.toggleShowConnections}
+            onToggleInfluence={advancedWarp.toggleShowInfluence}
+            onToggleMesh={advancedWarp.toggleShowMesh}
           />
         )}
         
@@ -441,19 +436,18 @@ const ImageEditor: React.FC = () => {
             documentHeight={documentHeight}
             showEdgeMapOverlay={showEdgeMapOverlay && activeTool === 'lasso'}
             edgeMapColorScheme={edgeMapColorScheme}
-            // Tessera Warp integration
-            warpState={tesseraWarp.state}
-            onWarpAddPin={(pos, kind) => {
-              if (kind === 'anchor') tesseraWarp.addAnchorPin(pos);
-              else tesseraWarp.addPosePin(pos);
-            }}
-            onWarpStartDrag={tesseraWarp.startDrag}
-            onWarpUpdateDrag={tesseraWarp.updateDrag}
-            onWarpEndDrag={tesseraWarp.endDrag}
-            onWarpSelectPin={tesseraWarp.selectPin}
-            onWarpRemovePin={tesseraWarp.removePin}
-            onWarpSolve={tesseraWarp.solveDeformation}
-            showWarpMesh={showWarpMesh}
+            // Advanced Warp integration
+            advancedWarpState={advancedWarp.state}
+            onAdvancedWarpAddCagePin={advancedWarp.addCagePin}
+            onAdvancedWarpAddControlPin={advancedWarp.addControlPin}
+            onAdvancedWarpAddBonePin={advancedWarp.addBonePin}
+            onAdvancedWarpSelectPin={advancedWarp.selectPin}
+            onAdvancedWarpDeletePin={advancedWarp.deletePin}
+            onAdvancedWarpStartDrag={advancedWarp.startDrag}
+            onAdvancedWarpUpdateDrag={advancedWarp.updateDrag}
+            onAdvancedWarpEndDrag={advancedWarp.endDrag}
+            onAdvancedWarpAddConnection={advancedWarp.addConnection}
+            advancedWarpGetPinAtPoint={advancedWarp.getPinAtPoint}
             // Callbacks
             onZoomChange={handleZoomChange}
             onSelectionChange={handleSelectionChange}

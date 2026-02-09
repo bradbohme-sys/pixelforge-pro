@@ -63,3 +63,13 @@ export type { UseTesseraWarpReturn } from './useTesseraWarp';
 export * from './AdvancedPinTypes';
 export { useAdvancedWarp } from './useAdvancedWarp';
 export type { UseAdvancedWarpReturn } from './useAdvancedWarp';
+
+// Advanced Pin Renderer
+export { drawAdvancedWarpOverlay } from './AdvancedPinRenderer';
+
+// Keyframe Animation
+export * from './KeyframeAnimation';
+
+// WebGL Renderer
+export { WebGLWarpRenderer } from './WebGLRenderer';
+export type { TransformMatrix, WebGLRendererOptions, DepthShaderSettings } from './WebGLRenderer';

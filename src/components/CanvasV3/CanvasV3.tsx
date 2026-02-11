@@ -532,11 +532,11 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     }
   }, [documentWidth, documentHeight]);
 
-  // Hide main canvas layers when warp is active to prevent double rendering
+  // NOTE: Don't hide layer content - no WebGL warp renderer is active yet.
+  // The image should remain visible while pins are placed on top of it.
   useEffect(() => {
     if (renderPipelineRef.current) {
-      const shouldHide = activeTool === 'warp' && advancedWarpState !== undefined && advancedWarpState.pins.length > 0;
-      renderPipelineRef.current.setHideLayerContent(shouldHide);
+      renderPipelineRef.current.setHideLayerContent(false);
     }
   }, [activeTool, advancedWarpState?.pins.length]);
 

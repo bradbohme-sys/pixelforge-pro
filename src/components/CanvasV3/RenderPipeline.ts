@@ -14,6 +14,8 @@ import {
 } from './constants';
 import type { Layer, CanvasState } from './types';
 import { CoordinateSystem } from './CoordinateSystem';
+import type { AdvancedPin } from './TesseraWarp/AdvancedPinTypes';
+import { drawDeformedImage } from './TesseraWarp/Canvas2DWarpDeformer';
 
 export class RenderPipeline {
   private rafId: number | null = null;
@@ -36,6 +38,9 @@ export class RenderPipeline {
   
   // Hide layers when external renderer (e.g., warp) takes over
   private hideLayerContent: boolean = false;
+  
+  // Warp pins for mesh deformation
+  private warpPins: AdvancedPin[] | null = null;
   
   private onRenderInteraction: ((ctx: CanvasRenderingContext2D, deltaTime: number) => void) | null = null;
 
@@ -114,6 +119,14 @@ export class RenderPipeline {
     }
   }
 
+  /**
+   * Set warp pins for mesh deformation. Pass null to disable warping.
+   */
+  setWarpPins(pins: AdvancedPin[] | null): void {
+    this.warpPins = pins;
+    this.layerCacheDirty = true;
+  }
+
   setInteractionRenderer(
     callback: (ctx: CanvasRenderingContext2D, deltaTime: number) => void
   ): void {
@@ -131,11 +144,14 @@ export class RenderPipeline {
     const ctx = this.mainCanvas.getContext('2d');
     if (!ctx) return;
     
+    // When warping, always re-render (pins may be moving)
+    const isWarping = this.warpPins && this.warpPins.length > 0;
+    
     // Reset transform and clear entire buffer
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.mainCanvas.width, this.mainCanvas.height);
     
-    if (this.layerCacheDirty) {
+    if (this.layerCacheDirty || isWarping) {
       this.renderLayerCache();
       this.layerCacheDirty = false;
     }
@@ -186,13 +202,31 @@ export class RenderPipeline {
     const image = layer.image;
     if (!image) return;
     
-    ctx.save();
-    ctx.globalAlpha = layer.opacity;
-    ctx.globalCompositeOperation = layer.blendMode || 'source-over';
-    
     const { x, y, width, height } = layer.bounds;
     const transform = layer.transform || { rotation: 0, scaleX: 1, scaleY: 1 };
     const { rotation, scaleX, scaleY } = transform;
+    
+    // Use warp deformation if pins are active
+    if (this.warpPins && this.warpPins.length > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = layer.blendMode || 'source-over';
+      
+      // Apply rotation/scale transforms if needed
+      if (rotation !== 0 || scaleX !== 1 || scaleY !== 1) {
+        ctx.translate(x + width / 2, y + height / 2);
+        ctx.rotate((rotation * Math.PI) / 180);
+        ctx.scale(scaleX, scaleY);
+        ctx.translate(-(x + width / 2), -(y + height / 2));
+      }
+      
+      drawDeformedImage(ctx, image, x, y, width, height, this.warpPins, layer.opacity);
+      ctx.restore();
+      return;
+    }
+    
+    ctx.save();
+    ctx.globalAlpha = layer.opacity;
+    ctx.globalCompositeOperation = layer.blendMode || 'source-over';
     
     ctx.translate(x + width / 2, y + height / 2);
     ctx.rotate((rotation * Math.PI) / 180);

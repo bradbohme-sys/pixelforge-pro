@@ -532,13 +532,17 @@ export const CanvasV3: React.FC<CanvasV3Props> = ({
     }
   }, [documentWidth, documentHeight]);
 
-  // NOTE: Don't hide layer content - no WebGL warp renderer is active yet.
-  // The image should remain visible while pins are placed on top of it.
+  // Pass warp pins to render pipeline for real-time mesh deformation
   useEffect(() => {
     if (renderPipelineRef.current) {
+      if (activeTool === 'warp' && advancedWarpState && advancedWarpState.pins.length > 0) {
+        renderPipelineRef.current.setWarpPins(advancedWarpState.pins);
+      } else {
+        renderPipelineRef.current.setWarpPins(null);
+      }
       renderPipelineRef.current.setHideLayerContent(false);
     }
-  }, [activeTool, advancedWarpState?.pins.length]);
+  }, [activeTool, advancedWarpState]);
 
   const handlePanZoomUpdate = useCallback(() => {
     if (!coordSystemRef.current) return;
